@@ -9,7 +9,7 @@ const scriptConfig = {
   input: 'src/index.ts',
   output: [
     {
-      file: 'dist/index.esm.js',
+      file: 'dist/index.js',
       format: 'esm',
       sourcemap: true,
     },
