@@ -17,6 +17,13 @@ interface TiptapNode {
   marks?: Array<{ type: string; attrs?: Record<string, any> }>;
 }
 
+const safeFlatMap = <T, U>(
+  array: T[] | undefined,
+  callback: (value: T, index: number, array: T[]) => U | U[]
+): U[] => (
+  array ? array.flatMap(callback) : []
+)
+
 /**
  * Converts a Contentful Rich Text Document to Tiptap JSON format
  */
@@ -26,79 +33,79 @@ export const contentfulToTiptap = (document: Document): TiptapNode => {
       case BLOCKS.DOCUMENT:
         return {
           type: 'doc',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.PARAGRAPH:
         return {
           type: 'paragraph',
-          content: node.content ? node.content.map(child => convertNode(child)).flat() : [],
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_1:
         return {
           type: 'heading',
           attrs: { level: 1 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_2:
         return {
           type: 'heading',
           attrs: { level: 2 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_3:
         return {
           type: 'heading',
           attrs: { level: 3 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_4:
         return {
           type: 'heading',
           attrs: { level: 4 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_5:
         return {
           type: 'heading',
           attrs: { level: 5 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HEADING_6:
         return {
           type: 'heading',
           attrs: { level: 6 },
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.UL_LIST:
         return {
           type: 'bulletList',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.OL_LIST:
         return {
           type: 'orderedList',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.LIST_ITEM:
         return {
           type: 'listItem',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.QUOTE:
         return {
           type: 'blockquote',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.HR:
@@ -109,25 +116,25 @@ export const contentfulToTiptap = (document: Document): TiptapNode => {
       case BLOCKS.TABLE:
         return {
           type: 'table',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.TABLE_ROW:
         return {
           type: 'tableRow',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.TABLE_CELL:
         return {
           type: 'tableCell',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case BLOCKS.TABLE_HEADER_CELL:
         return {
           type: 'tableHeader',
-          content: node.content.map(child => convertNode(child)).flat(),
+          content: safeFlatMap(node.content, convertNode),
         };
 
       case INLINES.HYPERLINK:

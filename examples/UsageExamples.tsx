@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Document } from '@contentful/rich-text-types';
+import { BLOCKS, Document } from '@contentful/rich-text-types';
 import { 
   ContentfulRichTextEditor, 
   ContentfulFieldConfiguration,
   fetchContentfulFieldConfig,
   createMockFieldConfig,
   parseContentfulFieldConfig 
-} from './src';
+} from '../src';
 
 // Example 1: Using with real Contentful Management API
 const ContentfulEditorWithAPI: React.FC = () => {
@@ -19,12 +19,14 @@ const ContentfulEditorWithAPI: React.FC = () => {
     const loadFieldConfig = async () => {
       try {
         // Replace these with your actual Contentful details
-        const config = await fetchContentfulFieldConfig(
-          process.env.REACT_APP_CONTENTFUL_SPACE_ID!,
-          process.env.REACT_APP_CONTENTFUL_CONTENT_TYPE_ID!,
-          process.env.REACT_APP_CONTENTFUL_FIELD_ID!,
-          process.env.REACT_APP_CONTENTFUL_MANAGEMENT_TOKEN!
-        );
+        const config = process.env.REACT_APP_CONTENTFUL_SPACE_ID
+          ? await fetchContentfulFieldConfig(
+              process.env.REACT_APP_CONTENTFUL_SPACE_ID!,
+              process.env.REACT_APP_CONTENTFUL_CONTENT_TYPE_ID!,
+              process.env.REACT_APP_CONTENTFUL_FIELD_ID!,
+              process.env.REACT_APP_CONTENTFUL_MANAGEMENT_TOKEN!,
+            )
+          : undefined;
         
         setFieldConfig(config || undefined);
       } catch (err) {
@@ -259,60 +261,60 @@ const ContentfulEditorManualConfig: React.FC = () => {
 const ContentfulEditorReadOnly: React.FC = () => {
   // Sample rich text content
   const sampleContent: Document = {
-    nodeType: 'document',
+    nodeType: BLOCKS.DOCUMENT,
     data: {},
     content: [
       {
-        nodeType: 'heading-1',
+        nodeType: BLOCKS.HEADING_1,
         data: {},
         content: [
           {
-            nodeType: 'text',
-            value: 'Welcome to Our Platform',
+            nodeType: "text",
+            value: "Welcome to Our Platform",
             marks: [],
             data: {},
           },
         ],
       },
       {
-        nodeType: 'paragraph',
+        nodeType: BLOCKS.PARAGRAPH,
         data: {},
         content: [
           {
-            nodeType: 'text',
-            value: 'This is a ',
+            nodeType: "text",
+            value: "This is a ",
             marks: [],
             data: {},
           },
           {
-            nodeType: 'text',
-            value: 'read-only',
-            marks: [{ type: 'bold' }],
+            nodeType: "text",
+            value: "read-only",
+            marks: [{ type: "bold" }],
             data: {},
           },
           {
-            nodeType: 'text',
-            value: ' rich text editor that displays content without allowing edits.',
+            nodeType: "text",
+            value: " rich text editor that displays content without allowing edits.",
             marks: [],
             data: {},
           },
         ],
       },
       {
-        nodeType: 'unordered-list',
+        nodeType: BLOCKS.UL_LIST,
         data: {},
         content: [
           {
-            nodeType: 'list-item',
+            nodeType: BLOCKS.LIST_ITEM,
             data: {},
             content: [
               {
-                nodeType: 'paragraph',
+                nodeType: BLOCKS.PARAGRAPH,
                 data: {},
                 content: [
                   {
-                    nodeType: 'text',
-                    value: 'Perfect for displaying content',
+                    nodeType: "text",
+                    value: "Perfect for displaying content",
                     marks: [],
                     data: {},
                   },
@@ -321,16 +323,16 @@ const ContentfulEditorReadOnly: React.FC = () => {
             ],
           },
           {
-            nodeType: 'list-item',
+            nodeType: BLOCKS.LIST_ITEM,
             data: {},
             content: [
               {
-                nodeType: 'paragraph',
+                nodeType: BLOCKS.PARAGRAPH,
                 data: {},
                 content: [
                   {
-                    nodeType: 'text',
-                    value: 'Maintains all rich text formatting',
+                    nodeType: "text",
+                    value: "Maintains all rich text formatting",
                     marks: [],
                     data: {},
                   },
@@ -339,17 +341,17 @@ const ContentfulEditorReadOnly: React.FC = () => {
             ],
           },
           {
-            nodeType: 'list-item',
+            nodeType: BLOCKS.LIST_ITEM,
             data: {},
             content: [
               {
-                nodeType: 'paragraph',
+                nodeType: BLOCKS.PARAGRAPH,
                 data: {},
                 content: [
                   {
-                    nodeType: 'text',
-                    value: 'No editing interface shown',
-                    marks: [{ type: 'italic' }],
+                    nodeType: "text",
+                    value: "No editing interface shown",
+                    marks: [{ type: "italic" }],
                     data: {},
                   },
                 ],
