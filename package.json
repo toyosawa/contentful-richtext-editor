@@ -2,7 +2,8 @@
   "name": "contentful-richtext-editor",
   "version": "2.0.4",
   "description": "A Tiptap-based rich text editor compatible with Contentful's rich text format",
-  "main": "dist/index.js",
+  "type": "module",
+  "main": "dist/index.cjs",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
   "files": [
