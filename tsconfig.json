@@ -12,7 +12,10 @@
       "@components/*": ["src/components/*"],
       "@utils/*": ["src/utils/*"],
       "@styles/*": ["src/styles/*"]
-    }
+    },
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
   },
   "include": ["src/**/*", "__tests__/**/*"]
 }
