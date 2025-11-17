@@ -357,7 +357,7 @@ export const tiptapToContentful = (tiptapDoc: any): Document => {
         }
 
         // Check if this is an inline entry (by looking for specific patterns)
-        const isInlineEntry = node.text && node.text.startsWith('[Inline Entry:');
+        const isInlineEntry = node.text?.startsWith('[Inline Entry:');
         if (isInlineEntry && node.marks?.some((mark: any) => mark.type === 'bold')) {
           // Extract entry ID from the text
           const match = node.text.match(/\[Inline Entry:\s*([^\]]+)\]/);

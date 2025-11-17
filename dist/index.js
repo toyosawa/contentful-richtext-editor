@@ -483,7 +483,7 @@ class Fragment {
     position in this fragment. The result object will be reused
     (overwritten) the next time the function is called. @internal
     */
-    findIndex(pos, round = -1) {
+    findIndex(pos) {
         if (pos == 0)
             return retIndex(0, pos);
         if (pos == this.size)
@@ -493,7 +493,7 @@ class Fragment {
         for (let i = 0, curPos = 0;; i++) {
             let cur = this.child(i), end = curPos + cur.nodeSize;
             if (end >= pos) {
-                if (end == pos || round > 0)
+                if (end == pos)
                     return retIndex(i + 1, end);
                 return retIndex(i, curPos);
             }
@@ -893,7 +893,7 @@ function insertInto(content, dist, insert, parent) {
             return null;
         return content.cut(0, dist).append(insert).append(content.cut(dist));
     }
-    let inner = insertInto(child.content, dist - offset - 1, insert);
+    let inner = insertInto(child.content, dist - offset - 1, insert, child);
     return inner && content.replaceChild(index, child.copy(inner));
 }
 function replace($from, $to, slice) {
@@ -1456,7 +1456,7 @@ let Node$1 = class Node {
     `blockSeparator` is given, it will be inserted to separate text
     from different block nodes. If `leafText` is given, it'll be
     inserted for every non-text leaf node encountered, otherwise
-    [`leafText`](https://prosemirror.net/docs/ref/#model.NodeSpec^leafText) will be used.
+    [`leafText`](https://prosemirror.net/docs/ref/#model.NodeSpec.leafText) will be used.
     */
     textBetween(from, to, blockSeparator, leafText) {
         return this.content.textBetween(from, to, blockSeparator, leafText);
@@ -2666,8 +2666,8 @@ class Schema {
             let type = this.marks[prop], excl = type.spec.excludes;
             type.excluded = excl == null ? [type] : excl == "" ? [] : gatherMarks(this, excl.split(" "));
         }
-        this.nodeFromJSON = this.nodeFromJSON.bind(this);
-        this.markFromJSON = this.markFromJSON.bind(this);
+        this.nodeFromJSON = json => Node$1.fromJSON(this, json);
+        this.markFromJSON = json => Mark$1.fromJSON(this, json);
         this.topNodeType = this.nodes[this.spec.topNode || "doc"];
         this.cached.wrappings = Object.create(null);
     }
@@ -2701,20 +2701,6 @@ class Schema {
         if (typeof type == "string")
             type = this.marks[type];
         return type.create(attrs);
-    }
-    /**
-    Deserialize a node from its JSON representation. This method is
-    bound.
-    */
-    nodeFromJSON(json) {
-        return Node$1.fromJSON(this, json);
-    }
-    /**
-    Deserialize a mark from its JSON representation. This method is
-    bound.
-    */
-    markFromJSON(json) {
-        return Mark$1.fromJSON(this, json);
     }
     /**
     @internal
@@ -2898,7 +2884,7 @@ class DOMParser {
     /**
     Construct a DOM parser using the parsing rules listed in a
     schema's [node specs](https://prosemirror.net/docs/ref/#model.NodeSpec.parseDOM), reordered by
-    [priority](https://prosemirror.net/docs/ref/#model.ParseRule.priority).
+    [priority](https://prosemirror.net/docs/ref/#model.GenericParseRule.priority).
     */
     static fromSchema(schema) {
         return schema.cached.domParser ||
@@ -3020,6 +3006,7 @@ class ParseContext {
         let value = dom.nodeValue;
         let top = this.top, preserveWS = (top.options & OPT_PRESERVE_WS_FULL) ? "full"
             : this.localPreserveWS || (top.options & OPT_PRESERVE_WS) > 0;
+        let { schema } = this.parser;
         if (preserveWS === "full" ||
             top.inlineContext(dom) ||
             /[^ \t\r\n\u000c]/.test(value)) {
@@ -3037,14 +3024,24 @@ class ParseContext {
                         value = value.slice(1);
                 }
             }
-            else if (preserveWS !== "full") {
-                value = value.replace(/\r?\n|\r/g, " ");
-            }
-            else {
+            else if (preserveWS === "full") {
                 value = value.replace(/\r\n?/g, "\n");
             }
+            else if (schema.linebreakReplacement && /[\r\n]/.test(value) && this.top.findWrapping(schema.linebreakReplacement.create())) {
+                let lines = value.split(/\r?\n|\r/);
+                for (let i = 0; i < lines.length; i++) {
+                    if (i)
+                        this.insertNode(schema.linebreakReplacement.create(), marks, true);
+                    if (lines[i])
+                        this.insertNode(schema.text(lines[i]), marks, !/\S/.test(lines[i]));
+                }
+                value = "";
+            }
+            else {
+                value = value.replace(/\r?\n|\r/g, " ");
+            }
             if (value)
-                this.insertNode(this.parser.schema.text(value), marks, !/\S/.test(value));
+                this.insertNode(schema.text(value), marks, !/\S/.test(value));
             this.findInText(dom);
         }
         else {
@@ -3649,6 +3646,8 @@ function renderSpec(doc, structure, xmlNS, blockArraysIn) {
                 let space = name.indexOf(" ");
                 if (space > 0)
                     dom.setAttributeNS(name.slice(0, space), name.slice(space + 1), attrs[name]);
+                else if (name == "style" && dom.style)
+                    dom.style.cssText = attrs[name];
                 else
                     dom.setAttribute(name, attrs[name]);
             }
@@ -4655,13 +4654,17 @@ can be lifted. Will not go across
 function liftTarget(range) {
     let parent = range.parent;
     let content = parent.content.cutByIndex(range.startIndex, range.endIndex);
-    for (let depth = range.depth;; --depth) {
+    for (let depth = range.depth, contentBefore = 0, contentAfter = 0;; --depth) {
         let node = range.$from.node(depth);
-        let index = range.$from.index(depth), endIndex = range.$to.indexAfter(depth);
+        let index = range.$from.index(depth) + contentBefore, endIndex = range.$to.indexAfter(depth) - contentAfter;
         if (depth < range.depth && node.canReplace(index, endIndex, content))
             return depth;
         if (depth == 0 || node.type.spec.isolating || !canCut(node, index, endIndex))
             break;
+        if (index)
+            contentBefore = 1;
+        if (endIndex < node.childCount)
+            contentAfter = 1;
     }
     return null;
 }
@@ -5312,7 +5315,7 @@ function replaceRange(tr, from, to, slice) {
     let $from = tr.doc.resolve(from), $to = tr.doc.resolve(to);
     if (fitsTrivially($from, $to, slice))
         return tr.step(new ReplaceStep(from, to, slice));
-    let targetDepths = coveredDepths($from, tr.doc.resolve(to));
+    let targetDepths = coveredDepths($from, $to);
     // Can't replace the whole document, so remove 0 if it's present
     if (targetDepths[targetDepths.length - 1] == 0)
         targetDepths.pop();
@@ -6459,7 +6462,6 @@ class Transaction extends Transform {
         else {
             if (to == null)
                 to = from;
-            to = to == null ? from : to;
             if (!text)
                 return this.deleteRange(from, to);
             let marks = this.storedMarks;
@@ -6468,7 +6470,7 @@ class Transaction extends Transform {
                 marks = to == from ? $from.marks() : $from.marksAcross(this.doc.resolve(to));
             }
             this.replaceRangeWith(from, to, schema.text(text, marks));
-            if (!this.selection.empty)
+            if (!this.selection.empty && this.selection.to == from + text.length)
                 this.setSelection(Selection.near(this.selection.$to));
             return this;
         }
@@ -6664,7 +6666,7 @@ class EditorState {
         return newInstance;
     }
     /**
-    Start a [transaction](https://prosemirror.net/docs/ref/#state.Transaction) from this state.
+    Accessor that constructs and returns a new [transaction](https://prosemirror.net/docs/ref/#state.Transaction) from this state.
     */
     get tr() { return new Transaction(this); }
     /**
@@ -7237,7 +7239,7 @@ function posFromCaret(view, node, offset, coords) {
         if (desc.dom.nodeType == 1 && (desc.node.isBlock && desc.parent || !desc.contentDOM) &&
             // Ignore elements with zero-size bounding rectangles
             ((rect = desc.dom.getBoundingClientRect()).width || rect.height)) {
-            if (desc.node.isBlock && desc.parent) {
+            if (desc.node.isBlock && desc.parent && !/^T(R|BODY|HEAD|FOOT)$/.test(desc.dom.nodeName)) {
                 // Only apply the horizontal test to the innermost block. Vertical for any parent.
                 if (!sawBlock && rect.left > coords.left || rect.top > coords.top)
                     outsideBlock = desc.posBefore;
@@ -7895,7 +7897,7 @@ class ViewDesc {
         // (one where the focus is before the anchor), but not all
         // browsers support it yet.
         let domSelExtended = false;
-        if ((domSel.extend || anchor == head) && !brKludge) {
+        if ((domSel.extend || anchor == head) && !(brKludge && gecko)) {
             domSel.collapse(anchorDOM.node, anchorDOM.offset);
             try {
                 if (anchor != head)
@@ -8307,17 +8309,18 @@ class NodeViewDesc extends ViewDesc {
     }
     // Mark this node as being the selected node.
     selectNode() {
-        if (this.nodeDOM.nodeType == 1)
+        if (this.nodeDOM.nodeType == 1) {
             this.nodeDOM.classList.add("ProseMirror-selectednode");
-        if (this.contentDOM || !this.node.type.spec.draggable)
-            this.dom.draggable = true;
+            if (this.contentDOM || !this.node.type.spec.draggable)
+                this.nodeDOM.draggable = true;
+        }
     }
     // Remove selected node marking from this node.
     deselectNode() {
         if (this.nodeDOM.nodeType == 1) {
             this.nodeDOM.classList.remove("ProseMirror-selectednode");
             if (this.contentDOM || !this.node.type.spec.draggable)
-                this.dom.removeAttribute("draggable");
+                this.nodeDOM.removeAttribute("draggable");
         }
     }
     get domAtom() { return this.node.isAtom; }
@@ -9156,17 +9159,14 @@ function removeClassOnSelectionChange(view) {
     });
 }
 function selectCursorWrapper(view) {
-    let domSel = view.domSelection(), range = document.createRange();
+    let domSel = view.domSelection();
     if (!domSel)
         return;
     let node = view.cursorWrapper.dom, img = node.nodeName == "IMG";
     if (img)
-        range.setStart(node.parentNode, domIndex(node) + 1);
+        domSel.collapse(node.parentNode, domIndex(node) + 1);
     else
-        range.setStart(node, 0);
-    range.collapse(true);
-    domSel.removeAllRanges();
-    domSel.addRange(range);
+        domSel.collapse(node, 0);
     // Kludge to kill 'control selection' in IE11 when selecting an
     // invisible cursor wrapper, since that would result in those weird
     // resize handles and a selection that considers the absolutely
@@ -9644,11 +9644,14 @@ function parseFromClipboard(view, text, html, plainText, $context) {
     let dom, slice;
     if (!html && !text)
         return null;
-    let asText = text && (plainText || inCode || !html);
+    let asText = !!text && (plainText || inCode || !html);
     if (asText) {
         view.someProp("transformPastedText", f => { text = f(text, inCode || plainText, view); });
-        if (inCode)
-            return text ? new Slice(Fragment.from(view.state.schema.text(text.replace(/\r\n?/g, "\n"))), 0, 0) : Slice.empty;
+        if (inCode) {
+            slice = new Slice(Fragment.from(view.state.schema.text(text.replace(/\r\n?/g, "\n"))), 0, 0);
+            view.someProp("transformPasted", f => { slice = f(slice, view, true); });
+            return slice;
+        }
         let parsed = view.someProp("clipboardTextParser", f => f(text, $context, plainText, view));
         if (parsed) {
             slice = parsed;
@@ -9706,7 +9709,7 @@ function parseFromClipboard(view, text, html, plainText, $context) {
             slice = closeSlice(slice, openStart, openEnd);
         }
     }
-    view.someProp("transformPasted", f => { slice = f(slice, view); });
+    view.someProp("transformPasted", f => { slice = f(slice, view, asText); });
     return slice;
 }
 const inlineParents = /^(a|abbr|acronym|b|cite|code|del|em|i|ins|kbd|label|output|q|ruby|s|samp|span|strong|sub|sup|time|u|tt|var)$/i;
@@ -10036,8 +10039,7 @@ function updateSelection(view, selection, origin) {
     if (view.state.selection.eq(selection))
         return;
     let tr = view.state.tr.setSelection(selection);
-    if (origin == "pointer")
-        tr.setMeta("pointer", true);
+    tr.setMeta("pointer", true);
     view.dispatch(tr);
 }
 function selectClickedLeaf(view, inside) {
@@ -10045,7 +10047,7 @@ function selectClickedLeaf(view, inside) {
         return false;
     let $pos = view.state.doc.resolve(inside), node = $pos.nodeAfter;
     if (node && node.isAtom && NodeSelection.isSelectable(node)) {
-        updateSelection(view, new NodeSelection($pos), "pointer");
+        updateSelection(view, new NodeSelection($pos));
         return true;
     }
     return false;
@@ -10069,7 +10071,7 @@ function selectClickedNode(view, inside) {
         }
     }
     if (selectAt != null) {
-        updateSelection(view, NodeSelection.create(view.state.doc, selectAt), "pointer");
+        updateSelection(view, NodeSelection.create(view.state.doc, selectAt));
         return true;
     }
     else {
@@ -10096,7 +10098,7 @@ function defaultTripleClick(view, inside, event) {
     let doc = view.state.doc;
     if (inside == -1) {
         if (doc.inlineContent) {
-            updateSelection(view, TextSelection.create(doc, 0, doc.content.size), "pointer");
+            updateSelection(view, TextSelection.create(doc, 0, doc.content.size));
             return true;
         }
         return false;
@@ -10106,9 +10108,9 @@ function defaultTripleClick(view, inside, event) {
         let node = i > $pos.depth ? $pos.nodeAfter : $pos.node(i);
         let nodePos = $pos.before(i);
         if (node.inlineContent)
-            updateSelection(view, TextSelection.create(doc, nodePos + 1, nodePos + 1 + node.content.size), "pointer");
+            updateSelection(view, TextSelection.create(doc, nodePos + 1, nodePos + 1 + node.content.size));
         else if (NodeSelection.isSelectable(node))
-            updateSelection(view, NodeSelection.create(doc, nodePos), "pointer");
+            updateSelection(view, NodeSelection.create(doc, nodePos));
         else
             continue;
         return true;
@@ -10169,7 +10171,7 @@ class MouseDown {
         }
         const target = flushed ? null : event.target;
         const targetDesc = target ? view.docView.nearestDesc(target, true) : null;
-        this.target = targetDesc && targetDesc.dom.nodeType == 1 ? targetDesc.dom : null;
+        this.target = targetDesc && targetDesc.nodeDOM.nodeType == 1 ? targetDesc.nodeDOM : null;
         let { selection } = view.state;
         if (event.button == 0 &&
             targetNode.type.spec.draggable && targetNode.type.spec.selectable !== false ||
@@ -10237,7 +10239,7 @@ class MouseDown {
                 // works around that.
                 (chrome && !this.view.state.selection.visible &&
                     Math.min(Math.abs(pos.pos - this.view.state.selection.from), Math.abs(pos.pos - this.view.state.selection.to)) <= 2))) {
-            updateSelection(this.view, Selection.near(this.view.state.doc.resolve(pos.pos)), "pointer");
+            updateSelection(this.view, Selection.near(this.view.state.doc.resolve(pos.pos)));
             event.preventDefault();
         }
         else {
@@ -10566,7 +10568,7 @@ editHandlers.drop = (view, _event) => {
     let $mouse = view.state.doc.resolve(eventPos.pos);
     let slice = dragging && dragging.slice;
     if (slice) {
-        view.someProp("transformPasted", f => { slice = f(slice, view); });
+        view.someProp("transformPasted", f => { slice = f(slice, view, false); });
     }
     else {
         slice = parseFromClipboard(view, getText$1(event.dataTransfer), brokenClipboardAPI ? null : event.dataTransfer.getData("text/html"), false, $mouse);
@@ -11752,7 +11754,7 @@ function ruleFromNode(dom) {
     }
     return null;
 }
-const isInline = /^(a|abbr|acronym|b|bd[io]|big|br|button|cite|code|data(list)?|del|dfn|em|i|ins|kbd|label|map|mark|meter|output|q|ruby|s|samp|small|span|strong|su[bp]|time|u|tt|var)$/i;
+const isInline = /^(a|abbr|acronym|b|bd[io]|big|br|button|cite|code|data(list)?|del|dfn|em|i|img|ins|kbd|label|map|mark|meter|output|q|ruby|s|samp|small|span|strong|su[bp]|time|u|tt|var)$/i;
 function readDOMChange(view, from, to, typeOver, addedNodes) {
     let compositionID = view.input.compositionPendingChanges || (view.composing ? view.input.compositionID : 0);
     view.input.compositionPendingChanges = 0;
@@ -11851,16 +11853,13 @@ function readDOMChange(view, from, to, typeOver, addedNodes) {
     let $to = parse.doc.resolveNoCache(change.endB - parse.from);
     let $fromA = doc.resolve(change.start);
     let inlineChange = $from.sameParent($to) && $from.parent.inlineContent && $fromA.end() >= change.endA;
-    let nextSel;
     // If this looks like the effect of pressing Enter (or was recorded
     // as being an iOS enter press), just dispatch an Enter key instead.
     if (((ios && view.input.lastIOSEnter > Date.now() - 225 &&
         (!inlineChange || addedNodes.some(n => n.nodeName == "DIV" || n.nodeName == "P"))) ||
         (!inlineChange && $from.pos < parse.doc.content.size &&
             (!$from.sameParent($to) || !$from.parent.inlineContent) &&
-            !/\S/.test(parse.doc.textBetween($from.pos, $to.pos, "", "")) &&
-            (nextSel = Selection.findFrom(parse.doc.resolve($from.pos + 1), 1, true)) &&
-            nextSel.head > $from.pos)) &&
+            $from.pos < $to.pos && !/\S/.test(parse.doc.textBetween($from.pos, $to.pos, "", "")))) &&
         view.someProp("handleKeyDown", f => f(view, keyEvent(13, "Enter")))) {
         view.input.lastIOSEnter = 0;
         return;
@@ -11945,6 +11944,9 @@ function readDOMChange(view, from, to, typeOver, addedNodes) {
             let deflt = () => mkTr(view.state.tr.insertText(text, chFrom, chTo));
             if (!view.someProp("handleTextInput", f => f(view, chFrom, chTo, text, deflt)))
                 view.dispatch(deflt());
+        }
+        else {
+            view.dispatch(mkTr());
         }
     }
     else {
@@ -13271,6 +13273,67 @@ const liftEmptyBlock$1 = (state, dispatch) => {
     return true;
 };
 /**
+Create a variant of [`splitBlock`](https://prosemirror.net/docs/ref/#commands.splitBlock) that uses
+a custom function to determine the type of the newly split off block.
+*/
+function splitBlockAs(splitNode) {
+    return (state, dispatch) => {
+        let { $from, $to } = state.selection;
+        if (state.selection instanceof NodeSelection && state.selection.node.isBlock) {
+            if (!$from.parentOffset || !canSplit(state.doc, $from.pos))
+                return false;
+            if (dispatch)
+                dispatch(state.tr.split($from.pos).scrollIntoView());
+            return true;
+        }
+        if (!$from.depth)
+            return false;
+        let types = [];
+        let splitDepth, deflt, atEnd = false, atStart = false;
+        for (let d = $from.depth;; d--) {
+            let node = $from.node(d);
+            if (node.isBlock) {
+                atEnd = $from.end(d) == $from.pos + ($from.depth - d);
+                atStart = $from.start(d) == $from.pos - ($from.depth - d);
+                deflt = defaultBlockAt$1($from.node(d - 1).contentMatchAt($from.indexAfter(d - 1)));
+                types.unshift((atEnd && deflt ? { type: deflt } : null));
+                splitDepth = d;
+                break;
+            }
+            else {
+                if (d == 1)
+                    return false;
+                types.unshift(null);
+            }
+        }
+        let tr = state.tr;
+        if (state.selection instanceof TextSelection || state.selection instanceof AllSelection)
+            tr.deleteSelection();
+        let splitPos = tr.mapping.map($from.pos);
+        let can = canSplit(tr.doc, splitPos, types.length, types);
+        if (!can) {
+            types[0] = deflt ? { type: deflt } : null;
+            can = canSplit(tr.doc, splitPos, types.length, types);
+        }
+        if (!can)
+            return false;
+        tr.split(splitPos, types.length, types);
+        if (!atEnd && atStart && $from.node(splitDepth).type != deflt) {
+            let first = tr.mapping.map($from.before(splitDepth)), $first = tr.doc.resolve(first);
+            if (deflt && $from.node(splitDepth - 1).canReplaceWith($first.index(), $first.index() + 1, deflt))
+                tr.setNodeMarkup(tr.mapping.map($from.before(splitDepth)), deflt);
+        }
+        if (dispatch)
+            dispatch(tr.scrollIntoView());
+        return true;
+    };
+}
+/**
+Split the parent block of the selection. If the selection is a text
+selection, also delete its content.
+*/
+const splitBlock$1 = splitBlockAs();
+/**
 Move the selection to the node wrapping the current selection, if
 any. (Will not select the document node.)
 */
@@ -13429,6 +13492,34 @@ function setBlockType(nodeType, attrs = null) {
         return true;
     };
 }
+/**
+Combine a number of command functions into a single function (which
+calls them one by one until one returns true).
+*/
+function chainCommands(...commands) {
+    return function (state, dispatch, view) {
+        for (let i = 0; i < commands.length; i++)
+            if (commands[i](state, dispatch, view))
+                return true;
+        return false;
+    };
+}
+chainCommands(deleteSelection$1, joinBackward$1, selectNodeBackward$1);
+chainCommands(deleteSelection$1, joinForward$1, selectNodeForward$1);
+/**
+A basic keymap containing bindings not specific to any schema.
+Binds the following keys (when multiple commands are listed, they
+are chained with [`chainCommands`](https://prosemirror.net/docs/ref/#commands.chainCommands)):
+
+* **Enter** to `newlineInCode`, `createParagraphNear`, `liftEmptyBlock`, `splitBlock`
+* **Mod-Enter** to `exitCode`
+* **Backspace** and **Mod-Backspace** to `deleteSelection`, `joinBackward`, `selectNodeBackward`
+* **Delete** and **Mod-Delete** to `deleteSelection`, `joinForward`, `selectNodeForward`
+* **Mod-Delete** to `deleteSelection`, `joinForward`, `selectNodeForward`
+* **Mod-a** to `selectAll`
+*/
+({
+    "Enter": chainCommands(newlineInCode$1, createParagraphNear$1, liftEmptyBlock$1, splitBlock$1)});
 typeof navigator != "undefined" ? /Mac|iP(hone|[oa]d)/.test(navigator.platform)
     // @ts-ignore
     : typeof os != "undefined" && os.platform ? os.platform() == "darwin" : false;
@@ -14667,7 +14758,7 @@ function pasteRulesPlugin(props) {
                         dropEvent = event;
                         if (!isDroppedFromProseMirror) {
                             const dragFromOtherEditor = tiptapDragFromOtherEditor;
-                            if (dragFromOtherEditor) {
+                            if (dragFromOtherEditor === null || dragFromOtherEditor === void 0 ? void 0 : dragFromOtherEditor.isEditable) {
                                 // setTimeout to avoid the wrong content after drop, timeout arg can't be empty or 0
                                 setTimeout(() => {
                                     const selection = dragFromOtherEditor.state.selection;
@@ -15218,7 +15309,7 @@ const cut = (originRange, targetPos) => ({ editor, tr }) => {
     tr.deleteRange(originRange.from, originRange.to);
     const newPos = tr.mapping.map(targetPos);
     tr.insert(newPos, contentSlice.content);
-    tr.setSelection(new TextSelection(tr.doc.resolve(newPos - 1)));
+    tr.setSelection(new TextSelection(tr.doc.resolve(Math.max(newPos - 1, 0))));
     return true;
 };
 
@@ -17681,7 +17772,7 @@ img.ProseMirror-separator {
 }`;
 
 function createStyleTag(style, nonce, suffix) {
-    const tiptapStyleTag = document.querySelector(`style[data-tiptap-style${suffix ? `-${suffix}` : ''}]`);
+    const tiptapStyleTag = document.querySelector(`style[data-tiptap-style${''}]`);
     if (tiptapStyleTag !== null) {
         return tiptapStyleTag;
     }
@@ -17689,7 +17780,7 @@ function createStyleTag(style, nonce, suffix) {
     if (nonce) {
         styleNode.setAttribute('nonce', nonce);
     }
-    styleNode.setAttribute(`data-tiptap-style${suffix ? `-${suffix}` : ''}`, '');
+    styleNode.setAttribute(`data-tiptap-style${''}`, '');
     styleNode.innerHTML = style;
     document.getElementsByTagName('head')[0].appendChild(styleNode);
     return styleNode;
@@ -18477,7 +18568,7 @@ function requireUseSyncExternalStoreShim_production_min () {
 	if (hasRequiredUseSyncExternalStoreShim_production_min) return useSyncExternalStoreShim_production_min;
 	hasRequiredUseSyncExternalStoreShim_production_min = 1;
 var e=React;function h(a,b){return a===b&&(0!==a||1/a===1/b)||a!==a&&b!==b}var k="function"===typeof Object.is?Object.is:h,l=e.useState,m=e.useEffect,n=e.useLayoutEffect,p=e.useDebugValue;function q(a,b){var d=b(),f=l({inst:{value:d,getSnapshot:b}}),c=f[0].inst,g=f[1];n(function(){c.value=d;c.getSnapshot=b;r(c)&&g({inst:c});},[a,d,b]);m(function(){r(c)&&g({inst:c});return a(function(){r(c)&&g({inst:c});})},[a]);p(d);return d}
-	function r(a){var b=a.getSnapshot;a=a.value;try{var d=b();return !k(a,d)}catch(f){return !0}}function t(a,b){return b()}var u="undefined"===typeof window||"undefined"===typeof window.document||"undefined"===typeof window.document.createElement?t:q;useSyncExternalStoreShim_production_min.useSyncExternalStore=void 0!==e.useSyncExternalStore?e.useSyncExternalStore:u;
+	function r(a){var b=a.getSnapshot;a=a.value;try{var d=b();return !k(a,d)}catch(f){return true}}function t(a,b){return b()}var u="undefined"===typeof window||"undefined"===typeof window.document||"undefined"===typeof window.document.createElement?t:q;useSyncExternalStoreShim_production_min.useSyncExternalStore=void 0!==e.useSyncExternalStore?e.useSyncExternalStore:u;
 	return useSyncExternalStoreShim_production_min;
 }
 
@@ -18986,8 +19077,8 @@ function requireWithSelector_production_min () {
 	if (hasRequiredWithSelector_production_min) return withSelector_production_min;
 	hasRequiredWithSelector_production_min = 1;
 var h=React,n=shimExports;function p(a,b){return a===b&&(0!==a||1/a===1/b)||a!==a&&b!==b}var q="function"===typeof Object.is?Object.is:p,r=n.useSyncExternalStore,t=h.useRef,u=h.useEffect,v=h.useMemo,w=h.useDebugValue;
-	withSelector_production_min.useSyncExternalStoreWithSelector=function(a,b,e,l,g){var c=t(null);if(null===c.current){var f={hasValue:!1,value:null};c.current=f;}else f=c.current;c=v(function(){function a(a){if(!c){c=!0;d=a;a=l(a);if(void 0!==g&&f.hasValue){var b=f.value;if(g(b,a))return k=b}return k=a}b=k;if(q(d,a))return b;var e=l(a);if(void 0!==g&&g(b,e))return b;d=a;return k=e}var c=!1,d,k,m=void 0===e?null:e;return [function(){return a(b())},null===m?void 0:function(){return a(m())}]},[b,e,l,g]);var d=r(a,c[0],c[1]);
-	u(function(){f.hasValue=!0;f.value=d;},[d]);w(d);return d};
+	withSelector_production_min.useSyncExternalStoreWithSelector=function(a,b,e,l,g){var c=t(null);if(null===c.current){var f={hasValue:false,value:null};c.current=f;}else f=c.current;c=v(function(){function a(a){if(!c){c=true;d=a;a=l(a);if(void 0!==g&&f.hasValue){var b=f.value;if(g(b,a))return k=b}return k=a}b=k;if(q(d,a))return b;var e=l(a);if(void 0!==g&&g(b,e))return b;d=a;return k=e}var c=false,d,k,m=void 0===e?null:e;return [function(){return a(b())},null===m?void 0:function(){return a(m())}]},[b,e,l,g]);var d=r(a,c[0],c[1]);
+	u(function(){f.hasValue=true;f.value=d;},[d]);w(d);return d};
 	return withSelector_production_min;
 }
 
@@ -20331,6 +20422,9 @@ class GapBookmark {
         return GapCursor.valid($pos) ? new GapCursor($pos) : Selection.near($pos);
     }
 }
+function needsGap(type) {
+    return type.isAtom || type.spec.isolating || type.spec.createGapCursor;
+}
 function closedBefore($pos) {
     for (let d = $pos.depth; d >= 0; d--) {
         let index = $pos.index(d), parent = $pos.node(d);
@@ -20342,7 +20436,7 @@ function closedBefore($pos) {
         }
         // See if the node before (or its first ancestor) is closed
         for (let before = parent.child(index - 1);; before = before.lastChild) {
-            if ((before.childCount == 0 && !before.inlineContent) || before.isAtom || before.type.spec.isolating)
+            if ((before.childCount == 0 && !before.inlineContent) || needsGap(before.type))
                 return true;
             if (before.inlineContent)
                 return false;
@@ -20360,7 +20454,7 @@ function closedAfter($pos) {
             continue;
         }
         for (let after = parent.child(index);; after = after.firstChild) {
-            if ((after.childCount == 0 && !after.inlineContent) || after.isAtom || after.type.spec.isolating)
+            if ((after.childCount == 0 && !after.inlineContent) || needsGap(after.type))
                 return true;
             if (after.inlineContent)
                 return false;
@@ -21204,7 +21298,7 @@ function history(config = {}) {
                 beforeinput(view, e) {
                     let inputType = e.inputType;
                     let command = inputType == "historyUndo" ? undo : inputType == "historyRedo" ? redo : null;
-                    if (!command)
+                    if (!command || !view.editable)
                         return false;
                     e.preventDefault();
                     return command(view.state, view.dispatch);
@@ -21779,23 +21873,9 @@ const StarterKit = Extension.create({
 // THIS FILE IS AUTOMATICALLY GENERATED DO NOT EDIT DIRECTLY
 // See update-tlds.js for encoding/decoding format
 // https://data.iana.org/TLD/tlds-alpha-by-domain.txt
-const encodedTlds = 'aaa1rp3bb0ott3vie4c1le2ogado5udhabi7c0ademy5centure6ountant0s9o1tor4d0s1ult4e0g1ro2tna4f0l1rica5g0akhan5ency5i0g1rbus3force5tel5kdn3l0ibaba4pay4lfinanz6state5y2sace3tom5m0azon4ericanexpress7family11x2fam3ica3sterdam8nalytics7droid5quan4z2o0l2partments8p0le4q0uarelle8r0ab1mco4chi3my2pa2t0e3s0da2ia2sociates9t0hleta5torney7u0ction5di0ble3o3spost5thor3o0s4w0s2x0a2z0ure5ba0by2idu3namex4d1k2r0celona5laycard4s5efoot5gains6seball5ketball8uhaus5yern5b0c1t1va3cg1n2d1e0ats2uty4er2rlin4st0buy5t2f1g1h0arti5i0ble3d1ke2ng0o3o1z2j1lack0friday9ockbuster8g1omberg7ue3m0s1w2n0pparibas9o0ats3ehringer8fa2m1nd2o0k0ing5sch2tik2on4t1utique6x2r0adesco6idgestone9oadway5ker3ther5ussels7s1t1uild0ers6siness6y1zz3v1w1y1z0h3ca0b1fe2l0l1vinklein9m0era3p2non3petown5ital0one8r0avan4ds2e0er0s4s2sa1e1h1ino4t0ering5holic7ba1n1re3c1d1enter4o1rn3f0a1d2g1h0anel2nel4rity4se2t2eap3intai5ristmas6ome4urch5i0priani6rcle4sco3tadel4i0c2y3k1l0aims4eaning6ick2nic1que6othing5ud3ub0med6m1n1o0ach3des3ffee4llege4ogne5m0mbank4unity6pany2re3uter5sec4ndos3struction8ulting7tact3ractors9oking4l1p2rsica5untry4pon0s4rses6pa2r0edit0card4union9icket5own3s1uise0s6u0isinella9v1w1x1y0mru3ou3z2dad1nce3ta1e1ing3sun4y2clk3ds2e0al0er2s3gree4livery5l1oitte5ta3mocrat6ntal2ist5si0gn4v2hl2iamonds6et2gital5rect0ory7scount3ver5h2y2j1k1m1np2o0cs1tor4g1mains5t1wnload7rive4tv2ubai3nlop4pont4rban5vag2r2z2earth3t2c0o2deka3u0cation8e1g1mail3erck5nergy4gineer0ing9terprises10pson4quipment8r0icsson6ni3s0q1tate5t1u0rovision8s2vents5xchange6pert3osed4ress5traspace10fage2il1rwinds6th3mily4n0s2rm0ers5shion4t3edex3edback6rrari3ero6i0delity5o2lm2nal1nce1ial7re0stone6mdale6sh0ing5t0ness6j1k1lickr3ghts4r2orist4wers5y2m1o0o0d1tball6rd1ex2sale4um3undation8x2r0ee1senius7l1ogans4ntier7tr2ujitsu5n0d2rniture7tbol5yi3ga0l0lery3o1up4me0s3p1rden4y2b0iz3d0n2e0a1nt0ing5orge5f1g0ee3h1i0ft0s3ves2ing5l0ass3e1obal2o4m0ail3bh2o1x2n1odaddy5ld0point6f2o0dyear5g0le4p1t1v2p1q1r0ainger5phics5tis4een3ipe3ocery4up4s1t1u0cci3ge2ide2tars5ru3w1y2hair2mburg5ngout5us3bo2dfc0bank7ealth0care8lp1sinki6re1mes5iphop4samitsu7tachi5v2k0t2m1n1ockey4ldings5iday5medepot5goods5s0ense7nda3rse3spital5t0ing5t0els3mail5use3w2r1sbc3t1u0ghes5yatt3undai7ibm2cbc2e1u2d1e0ee3fm2kano4l1m0amat4db2mo0bilien9n0c1dustries8finiti5o2g1k1stitute6urance4e4t0ernational10uit4vestments10o1piranga7q1r0ish4s0maili5t0anbul7t0au2v3jaguar4va3cb2e0ep2tzt3welry6io2ll2m0p2nj2o0bs1urg4t1y2p0morgan6rs3uegos4niper7kaufen5ddi3e0rryhotels6properties14fh2g1h1i0a1ds2m1ndle4tchen5wi3m1n1oeln3matsu5sher5p0mg2n2r0d1ed3uokgroup8w1y0oto4z2la0caixa5mborghini8er3nd0rover6xess5salle5t0ino3robe5w0yer5b1c1ds2ease3clerc5frak4gal2o2xus4gbt3i0dl2fe0insurance9style7ghting6ke2lly3mited4o2ncoln4k2ve1ing5k1lc1p2oan0s3cker3us3l1ndon4tte1o3ve3pl0financial11r1s1t0d0a3u0ndbeck6xe1ury5v1y2ma0drid4if1son4keup4n0agement7go3p1rket0ing3s4riott5shalls7ttel5ba2c0kinsey7d1e0d0ia3et2lbourne7me1orial6n0u2rckmsd7g1h1iami3crosoft7l1ni1t2t0subishi9k1l0b1s2m0a2n1o0bi0le4da2e1i1m1nash3ey2ster5rmon3tgage6scow4to0rcycles9v0ie4p1q1r1s0d2t0n1r2u0seum3ic4v1w1x1y1z2na0b1goya4me2vy3ba2c1e0c1t0bank4flix4work5ustar5w0s2xt0direct7us4f0l2g0o2hk2i0co2ke1on3nja3ssan1y5l1o0kia3rton4w0ruz3tv4p1r0a1w2tt2u1yc2z2obi1server7ffice5kinawa6layan0group9lo3m0ega4ne1g1l0ine5oo2pen3racle3nge4g0anic5igins6saka4tsuka4t2vh3pa0ge2nasonic7ris2s1tners4s1y3y2ccw3e0t2f0izer5g1h0armacy6d1ilips5one2to0graphy6s4ysio5ics1tet2ures6d1n0g1k2oneer5zza4k1l0ace2y0station9umbing5s3m1n0c2ohl2ker3litie5rn2st3r0america6xi3ess3ime3o0d0uctions8f1gressive8mo2perties3y5tection8u0dential9s1t1ub2w0c2y2qa1pon3uebec3st5racing4dio4e0ad1lestate6tor2y4cipes5d0stone5umbrella9hab3ise0n3t2liance6n0t0als5pair3ort3ublican8st0aurant8view0s5xroth6ich0ardli6oh3l1o1p2o0cks3deo3gers4om3s0vp3u0gby3hr2n2w0e2yukyu6sa0arland6fe0ty4kura4le1on3msclub4ung5ndvik0coromant12ofi4p1rl2s1ve2xo3b0i1s2c0b1haeffler7midt4olarships8ol3ule3warz5ience5ot3d1e0arch3t2cure1ity6ek2lect4ner3rvices6ven3w1x0y3fr2g1h0angrila6rp3ell3ia1ksha5oes2p0ping5uji3w3i0lk2na1gles5te3j1k0i0n2y0pe4l0ing4m0art3ile4n0cf3o0ccer3ial4ftbank4ware6hu2lar2utions7ng1y2y2pa0ce3ort2t3r0l2s1t0ada2ples4r1tebank4farm7c0group6ockholm6rage3e3ream4udio2y3yle4u0cks3pplies3y2ort5rf1gery5zuki5v1watch4iss4x1y0dney4stems6z2tab1ipei4lk2obao4rget4tamotors6r2too4x0i3c0i2d0k2eam2ch0nology8l1masek5nnis4va3f1g1h0d1eater2re6iaa2ckets5enda4ps2res2ol4j0maxx4x2k0maxx5l1m0all4n1o0day3kyo3ols3p1ray3shiba5tal3urs3wn2yota3s3r0ade1ing4ining5vel0ers0insurance16ust3v2t1ube2i1nes3shu4v0s2w1z2ua1bank3s2g1k1nicom3versity8o2ol2ps2s1y1z2va0cations7na1guard7c1e0gas3ntures6risign5mögensberater2ung14sicherung10t2g1i0ajes4deo3g1king4llas4n1p1rgin4sa1ion4va1o3laanderen9n1odka3lvo3te1ing3o2yage5u2wales2mart4ter4ng0gou5tch0es6eather0channel12bcam3er2site5d0ding5ibo2r3f1hoswho6ien2ki2lliamhill9n0dows4e1ners6me2olterskluwer11odside6rk0s2ld3w2s1tc1f3xbox3erox4ihuan4n2xx2yz3yachts4hoo3maxun5ndex5e1odobashi7ga2kohama6u0tube6t1un3za0ppos4ra3ero3ip2m1one3uerich6w2';
+const encodedTlds = 'aaa1rp3bb0ott3vie4c1le2ogado5udhabi7c0ademy5centure6ountant0s9o1tor4d0s1ult4e0g1ro2tna4f0l1rica5g0akhan5ency5i0g1rbus3force5tel5kdn3l0ibaba4pay4lfinanz6state5y2sace3tom5m0azon4ericanexpress7family11x2fam3ica3sterdam8nalytics7droid5quan4z2o0l2partments8p0le4q0uarelle8r0ab1mco4chi3my2pa2t0e3s0da2ia2sociates9t0hleta5torney7u0ction5di0ble3o3spost5thor3o0s4w0s2x0a2z0ure5ba0by2idu3namex4d1k2r0celona5laycard4s5efoot5gains6seball5ketball8uhaus5yern5b0c1t1va3cg1n2d1e0ats2uty4er2rlin4st0buy5t2f1g1h0arti5i0ble3d1ke2ng0o3o1z2j1lack0friday9ockbuster8g1omberg7ue3m0s1w2n0pparibas9o0ats3ehringer8fa2m1nd2o0k0ing5sch2tik2on4t1utique6x2r0adesco6idgestone9oadway5ker3ther5ussels7s1t1uild0ers6siness6y1zz3v1w1y1z0h3ca0b1fe2l0l1vinklein9m0era3p2non3petown5ital0one8r0avan4ds2e0er0s4s2sa1e1h1ino4t0ering5holic7ba1n1re3c1d1enter4o1rn3f0a1d2g1h0anel2nel4rity4se2t2eap3intai5ristmas6ome4urch5i0priani6rcle4sco3tadel4i0c2y3k1l0aims4eaning6ick2nic1que6othing5ud3ub0med6m1n1o0ach3des3ffee4llege4ogne5m0mbank4unity6pany2re3uter5sec4ndos3struction8ulting7tact3ractors9oking4l1p2rsica5untry4pon0s4rses6pa2r0edit0card4union9icket5own3s1uise0s6u0isinella9v1w1x1y0mru3ou3z2dad1nce3ta1e1ing3sun4y2clk3ds2e0al0er2s3gree4livery5l1oitte5ta3mocrat6ntal2ist5si0gn4v2hl2iamonds6et2gital5rect0ory7scount3ver5h2y2j1k1m1np2o0cs1tor4g1mains5t1wnload7rive4tv2ubai3nlop4pont4rban5vag2r2z2earth3t2c0o2deka3u0cation8e1g1mail3erck5nergy4gineer0ing9terprises10pson4quipment8r0icsson6ni3s0q1tate5t1u0rovision8s2vents5xchange6pert3osed4ress5traspace10fage2il1rwinds6th3mily4n0s2rm0ers5shion4t3edex3edback6rrari3ero6i0delity5o2lm2nal1nce1ial7re0stone6mdale6sh0ing5t0ness6j1k1lickr3ghts4r2orist4wers5y2m1o0o0d1tball6rd1ex2sale4um3undation8x2r0ee1senius7l1ogans4ntier7tr2ujitsu5n0d2rniture7tbol5yi3ga0l0lery3o1up4me0s3p1rden4y2b0iz3d0n2e0a1nt0ing5orge5f1g0ee3h1i0ft0s3ves2ing5l0ass3e1obal2o4m0ail3bh2o1x2n1odaddy5ld0point6f2o0dyear5g0le4p1t1v2p1q1r0ainger5phics5tis4een3ipe3ocery4up4s1t1u0cci3ge2ide2tars5ru3w1y2hair2mburg5ngout5us3bo2dfc0bank7ealth0care8lp1sinki6re1mes5iphop4samitsu7tachi5v2k0t2m1n1ockey4ldings5iday5medepot5goods5s0ense7nda3rse3spital5t0ing5t0els3mail5use3w2r1sbc3t1u0ghes5yatt3undai7ibm2cbc2e1u2d1e0ee3fm2kano4l1m0amat4db2mo0bilien9n0c1dustries8finiti5o2g1k1stitute6urance4e4t0ernational10uit4vestments10o1piranga7q1r0ish4s0maili5t0anbul7t0au2v3jaguar4va3cb2e0ep2tzt3welry6io2ll2m0p2nj2o0bs1urg4t1y2p0morgan6rs3uegos4niper7kaufen5ddi3e0rryhotels6properties14fh2g1h1i0a1ds2m1ndle4tchen5wi3m1n1oeln3matsu5sher5p0mg2n2r0d1ed3uokgroup8w1y0oto4z2la0caixa5mborghini8er3nd0rover6xess5salle5t0ino3robe5w0yer5b1c1ds2ease3clerc5frak4gal2o2xus4gbt3i0dl2fe0insurance9style7ghting6ke2lly3mited4o2ncoln4k2ve1ing5k1lc1p2oan0s3cker3us3l1ndon4tte1o3ve3pl0financial11r1s1t0d0a3u0ndbeck6xe1ury5v1y2ma0drid4if1son4keup4n0agement7go3p1rket0ing3s4riott5shalls7ttel5ba2c0kinsey7d1e0d0ia3et2lbourne7me1orial6n0u2rckmsd7g1h1iami3crosoft7l1ni1t2t0subishi9k1l0b1s2m0a2n1o0bi0le4da2e1i1m1nash3ey2ster5rmon3tgage6scow4to0rcycles9v0ie4p1q1r1s0d2t0n1r2u0seum3ic4v1w1x1y1z2na0b1goya4me2vy3ba2c1e0c1t0bank4flix4work5ustar5w0s2xt0direct7us4f0l2g0o2hk2i0co2ke1on3nja3ssan1y5l1o0kia3rton4w0ruz3tv4p1r0a1w2tt2u1yc2z2obi1server7ffice5kinawa6layan0group9lo3m0ega4ne1g1l0ine5oo2pen3racle3nge4g0anic5igins6saka4tsuka4t2vh3pa0ge2nasonic7ris2s1tners4s1y3y2ccw3e0t2f0izer5g1h0armacy6d1ilips5one2to0graphy6s4ysio5ics1tet2ures6d1n0g1k2oneer5zza4k1l0ace2y0station9umbing5s3m1n0c2ohl2ker3litie5rn2st3r0axi3ess3ime3o0d0uctions8f1gressive8mo2perties3y5tection8u0dential9s1t1ub2w0c2y2qa1pon3uebec3st5racing4dio4e0ad1lestate6tor2y4cipes5d0stone5umbrella9hab3ise0n3t2liance6n0t0als5pair3ort3ublican8st0aurant8view0s5xroth6ich0ardli6oh3l1o1p2o0cks3deo3gers4om3s0vp3u0gby3hr2n2w0e2yukyu6sa0arland6fe0ty4kura4le1on3msclub4ung5ndvik0coromant12ofi4p1rl2s1ve2xo3b0i1s2c0b1haeffler7midt4olarships8ol3ule3warz5ience5ot3d1e0arch3t2cure1ity6ek2lect4ner3rvices6ven3w1x0y3fr2g1h0angrila6rp3ell3ia1ksha5oes2p0ping5uji3w3i0lk2na1gles5te3j1k0i0n2y0pe4l0ing4m0art3ile4n0cf3o0ccer3ial4ftbank4ware6hu2lar2utions7ng1y2y2pa0ce3ort2t3r0l2s1t0ada2ples4r1tebank4farm7c0group6ockholm6rage3e3ream4udio2y3yle4u0cks3pplies3y2ort5rf1gery5zuki5v1watch4iss4x1y0dney4stems6z2tab1ipei4lk2obao4rget4tamotors6r2too4x0i3c0i2d0k2eam2ch0nology8l1masek5nnis4va3f1g1h0d1eater2re6iaa2ckets5enda4ps2res2ol4j0maxx4x2k0maxx5l1m0all4n1o0day3kyo3ols3p1ray3shiba5tal3urs3wn2yota3s3r0ade1ing4ining5vel0ers0insurance16ust3v2t1ube2i1nes3shu4v0s2w1z2ua1bank3s2g1k1nicom3versity8o2ol2ps2s1y1z2va0cations7na1guard7c1e0gas3ntures6risign5mögensberater2ung14sicherung10t2g1i0ajes4deo3g1king4llas4n1p1rgin4sa1ion4va1o3laanderen9n1odka3lvo3te1ing3o2yage5u2wales2mart4ter4ng0gou5tch0es6eather0channel12bcam3er2site5d0ding5ibo2r3f1hoswho6ien2ki2lliamhill9n0dows4e1ners6me2olterskluwer11odside6rk0s2ld3w2s1tc1f3xbox3erox4ihuan4n2xx2yz3yachts4hoo3maxun5ndex5e1odobashi7ga2kohama6u0tube6t1un3za0ppos4ra3ero3ip2m1one3uerich6w2';
 // Internationalized domain names containing non-ASCII
 const encodedUtlds = 'ελ1υ2бг1ел3дети4ею2католик6ом3мкд2он1сква6онлайн5рг3рус2ф2сайт3рб3укр3қаз3հայ3ישראל5קום3ابوظبي5رامكو5لاردن4بحرين5جزائر5سعودية6عليان5مغرب5مارات5یران5بارت2زار4يتك3ھارت5تونس4سودان3رية5شبكة4عراق2ب2مان4فلسطين6قطر3كاثوليك6وم3مصر2ليسيا5وريتانيا7قع4همراه5پاکستان7ڀارت4कॉम3नेट3भारत0म्3ोत5संगठन5বাংলা5ভারত2ৰত4ਭਾਰਤ4ભારત4ଭାରତ4இந்தியா6லங்கை6சிங்கப்பூர்11భారత్5ಭಾರತ4ഭാരതം5ලංකා4คอม3ไทย3ລາວ3გე2みんな3アマゾン4クラウド4グーグル4コム2ストア3セール3ファッション6ポイント4世界2中信1国1國1文网3亚马逊3企业2佛山2信息2健康2八卦2公司1益2台湾1灣2商城1店1标2嘉里0大酒店5在线2大拿2天主教3娱乐2家電2广东2微博2慈善2我爱你3手机2招聘2政务1府2新加坡2闻2时尚2書籍2机构2淡马锡3游戏2澳門2点看2移动2组织机构4网址1店1站1络2联通2谷歌2购物2通販2集团2電訊盈科4飞利浦3食品2餐厅2香格里拉3港2닷넷1컴2삼성2한국2';
-
-/**
- * @template A
- * @template B
- * @param {A} target
- * @param {B} properties
- * @return {A & B}
- */
-const assign = (target, properties) => {
-  for (const key in properties) {
-    target[key] = properties[key];
-  }
-  return target;
-};
 
 /**
  * Finite State Machine generation utilities
@@ -22059,7 +22139,7 @@ State.prototype = {
       templateState = state.go(input);
     if (templateState) {
       nextState = new State();
-      assign(nextState.j, templateState.j);
+      Object.assign(nextState.j, templateState.j);
       nextState.jr.push.apply(nextState.jr, templateState.jr);
       nextState.jd = templateState.jd;
       nextState.t = templateState.t;
@@ -22070,7 +22150,7 @@ State.prototype = {
       // Ensure newly token is in the same groups as the old token
       if (groups) {
         if (nextState.t && typeof nextState.t === 'string') {
-          const allFlags = assign(flagsForToken(nextState.t, groups), flags);
+          const allFlags = Object.assign(flagsForToken(nextState.t, groups), flags);
           addToGroups(t, allFlags, groups);
         } else if (flags) {
           addToGroups(t, flags, groups);
@@ -22509,7 +22589,7 @@ function init$2(customSchemes = []) {
   Start.jd = new State(SYM);
   return {
     start: Start,
-    tokens: assign({
+    tokens: Object.assign({
       groups
     }, tk)
   };
@@ -22778,9 +22858,9 @@ const defaults = {
  *   Similar to render option
  */
 function Options(opts, defaultRender = null) {
-  let o = assign({}, defaults);
+  let o = Object.assign({}, defaults);
   if (opts) {
-    o = assign(o, opts instanceof Options ? opts.o : opts);
+    o = Object.assign(o, opts instanceof Options ? opts.o : opts);
   }
 
   // Ensure all ignored tags are uppercase
@@ -23025,7 +23105,7 @@ MultiToken.prototype = {
       attributes.rel = rel;
     }
     if (attrs) {
-      assign(attributes, attrs);
+      Object.assign(attributes, attrs);
     }
     return {
       tagName,
@@ -23531,6 +23611,13 @@ function find(str, type = null, opts = null) {
   return filtered;
 }
 
+// From DOMPurify
+// https://github.com/cure53/DOMPurify/blob/main/src/regexp.ts
+const UNICODE_WHITESPACE_PATTERN = '[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]';
+const UNICODE_WHITESPACE_REGEX = new RegExp(UNICODE_WHITESPACE_PATTERN);
+const UNICODE_WHITESPACE_REGEX_END = new RegExp(`${UNICODE_WHITESPACE_PATTERN}$`);
+const UNICODE_WHITESPACE_REGEX_GLOBAL = new RegExp(UNICODE_WHITESPACE_PATTERN, 'g');
+
 /**
  * Check if the provided tokens form a valid link structure, which can either be a single link token
  * or a link token surrounded by parentheses or square brackets.
@@ -23587,14 +23674,16 @@ function autolink(options) {
                     textBlock = nodesInChangedRanges[0];
                     textBeforeWhitespace = newState.doc.textBetween(textBlock.pos, textBlock.pos + textBlock.node.nodeSize, undefined, ' ');
                 }
-                else if (nodesInChangedRanges.length
-                    // We want to make sure to include the block seperator argument to treat hard breaks like spaces.
-                    && newState.doc.textBetween(newRange.from, newRange.to, ' ', ' ').endsWith(' ')) {
+                else if (nodesInChangedRanges.length) {
+                    const endText = newState.doc.textBetween(newRange.from, newRange.to, ' ', ' ');
+                    if (!UNICODE_WHITESPACE_REGEX_END.test(endText)) {
+                        return;
+                    }
                     textBlock = nodesInChangedRanges[0];
                     textBeforeWhitespace = newState.doc.textBetween(textBlock.pos, newRange.to, undefined, ' ');
                 }
                 if (textBlock && textBeforeWhitespace) {
-                    const wordsBeforeWhitespace = textBeforeWhitespace.split(' ').filter(s => s !== '');
+                    const wordsBeforeWhitespace = textBeforeWhitespace.split(UNICODE_WHITESPACE_REGEX).filter(Boolean);
                     if (wordsBeforeWhitespace.length <= 0) {
                         return false;
                     }
@@ -23706,10 +23795,6 @@ function pasteHandler(options) {
         },
     });
 }
-// From DOMPurify
-// https://github.com/cure53/DOMPurify/blob/main/src/regexp.js
-// eslint-disable-next-line no-control-regex
-const ATTR_WHITESPACE = /[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]/g;
 function isAllowedUri(uri, protocols) {
     const allowedProtocols = [
         'http',
@@ -23732,9 +23817,7 @@ function isAllowedUri(uri, protocols) {
         });
     }
     return (!uri
-        || uri
-            .replace(ATTR_WHITESPACE, '')
-            .match(new RegExp(
+        || uri.replace(UNICODE_WHITESPACE_REGEX_GLOBAL, '').match(new RegExp(
         // eslint-disable-next-line no-useless-escape
         `^(?:(?:${allowedProtocols.join('|')}):|[^a-z]|[a-z0-9+.\-]+(?:[^a-z+.\-:]|$))`, 'i')));
 }
@@ -24713,6 +24796,8 @@ function fixTable(state, table, tablePos, tr) {
   }
   return tr.setMeta(fixTablesKey, { fixTables: true });
 }
+
+// src/commands.ts
 function selectedRect(state) {
   const sel = state.selection;
   const $pos = selectionCell(state);
@@ -26203,9 +26288,6 @@ function createColGroup(node, cellMinWidth, overrideCol, overrideValue) {
 }
 
 function createCell(cellType, cellContent) {
-    if (cellContent) {
-        return cellType.createChecked(null, cellContent);
-    }
     return cellType.createAndFill();
 }
 
@@ -26229,12 +26311,12 @@ function createTable(schema, rowsCount, colsCount, withHeaderRow, cellContent) {
     const headerCells = [];
     const cells = [];
     for (let index = 0; index < colsCount; index += 1) {
-        const cell = createCell(types.cell, cellContent);
+        const cell = createCell(types.cell);
         if (cell) {
             cells.push(cell);
         }
         if (withHeaderRow) {
-            const headerCell = createCell(types.header_cell, cellContent);
+            const headerCell = createCell(types.header_cell);
             if (headerCell) {
                 headerCells.push(headerCell);
             }
@@ -26287,6 +26369,7 @@ const Table = Node.create({
         return {
             HTMLAttributes: {},
             resizable: false,
+            renderWrapper: false,
             handleWidth: 5,
             cellMinWidth: 25,
             // TODO: fix
@@ -26314,7 +26397,7 @@ const Table = Node.create({
             colgroup,
             ['tbody', 0],
         ];
-        return table;
+        return this.options.renderWrapper ? ['div', { class: 'tableWrapper' }, table] : table;
     },
     addCommands() {
         return {
@@ -26775,7 +26858,7 @@ var hasRequiredSchemaConstraints;
 function requireSchemaConstraints () {
 	if (hasRequiredSchemaConstraints) return schemaConstraints;
 	hasRequiredSchemaConstraints = 1;
-	(function (exports) {
+	(function (exports$1) {
 		var __spreadArray = (schemaConstraints && schemaConstraints.__spreadArray) || function (to, from, pack) {
 		    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
 		        if (ar || !(i in from)) {
@@ -26786,8 +26869,8 @@ function requireSchemaConstraints () {
 		    return to.concat(ar || Array.prototype.slice.call(from));
 		};
 		var _a;
-		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.V1_MARKS = exports.V1_NODE_TYPES = exports.TEXT_CONTAINERS = exports.HEADINGS = exports.CONTAINERS = exports.VOID_BLOCKS = exports.TABLE_BLOCKS = exports.LIST_ITEM_BLOCKS = exports.TOP_LEVEL_BLOCKS = void 0;
+		Object.defineProperty(exports$1, "__esModule", { value: true });
+		exports$1.V1_MARKS = exports$1.V1_NODE_TYPES = exports$1.TEXT_CONTAINERS = exports$1.HEADINGS = exports$1.CONTAINERS = exports$1.VOID_BLOCKS = exports$1.TABLE_BLOCKS = exports$1.LIST_ITEM_BLOCKS = exports$1.TOP_LEVEL_BLOCKS = void 0;
 		var blocks_1 = requireBlocks();
 		var inlines_1 = requireInlines();
 		var marks_1 = requireMarks();
@@ -26795,7 +26878,7 @@ function requireSchemaConstraints () {
 		 * Array of all top level block types.
 		 * Only these block types can be the direct children of the document.
 		 */
-		exports.TOP_LEVEL_BLOCKS = [
+		exports$1.TOP_LEVEL_BLOCKS = [
 		    blocks_1.BLOCKS.PARAGRAPH,
 		    blocks_1.BLOCKS.HEADING_1,
 		    blocks_1.BLOCKS.HEADING_2,
@@ -26815,7 +26898,7 @@ function requireSchemaConstraints () {
 		/**
 		 * Array of all allowed block types inside list items
 		 */
-		exports.LIST_ITEM_BLOCKS = [
+		exports$1.LIST_ITEM_BLOCKS = [
 		    blocks_1.BLOCKS.PARAGRAPH,
 		    blocks_1.BLOCKS.HEADING_1,
 		    blocks_1.BLOCKS.HEADING_2,
@@ -26831,7 +26914,7 @@ function requireSchemaConstraints () {
 		    blocks_1.BLOCKS.EMBEDDED_ASSET,
 		    blocks_1.BLOCKS.EMBEDDED_RESOURCE,
 		];
-		exports.TABLE_BLOCKS = [
+		exports$1.TABLE_BLOCKS = [
 		    blocks_1.BLOCKS.TABLE,
 		    blocks_1.BLOCKS.TABLE_ROW,
 		    blocks_1.BLOCKS.TABLE_CELL,
@@ -26840,7 +26923,7 @@ function requireSchemaConstraints () {
 		/**
 		 * Array of all void block types
 		 */
-		exports.VOID_BLOCKS = [
+		exports$1.VOID_BLOCKS = [
 		    blocks_1.BLOCKS.HR,
 		    blocks_1.BLOCKS.EMBEDDED_ENTRY,
 		    blocks_1.BLOCKS.EMBEDDED_ASSET,
@@ -26851,10 +26934,10 @@ function requireSchemaConstraints () {
 		 *
 		 * Note: This does not include `[BLOCKS.DOCUMENT]: TOP_LEVEL_BLOCKS`
 		 */
-		exports.CONTAINERS = (_a = {},
+		exports$1.CONTAINERS = (_a = {},
 		    _a[blocks_1.BLOCKS.OL_LIST] = [blocks_1.BLOCKS.LIST_ITEM],
 		    _a[blocks_1.BLOCKS.UL_LIST] = [blocks_1.BLOCKS.LIST_ITEM],
-		    _a[blocks_1.BLOCKS.LIST_ITEM] = exports.LIST_ITEM_BLOCKS,
+		    _a[blocks_1.BLOCKS.LIST_ITEM] = exports$1.LIST_ITEM_BLOCKS,
 		    _a[blocks_1.BLOCKS.QUOTE] = [blocks_1.BLOCKS.PARAGRAPH],
 		    _a[blocks_1.BLOCKS.TABLE] = [blocks_1.BLOCKS.TABLE_ROW],
 		    _a[blocks_1.BLOCKS.TABLE_ROW] = [blocks_1.BLOCKS.TABLE_CELL, blocks_1.BLOCKS.TABLE_HEADER_CELL],
@@ -26864,7 +26947,7 @@ function requireSchemaConstraints () {
 		/**
 		 * Array of all heading levels
 		 */
-		exports.HEADINGS = [
+		exports$1.HEADINGS = [
 		    blocks_1.BLOCKS.HEADING_1,
 		    blocks_1.BLOCKS.HEADING_2,
 		    blocks_1.BLOCKS.HEADING_3,
@@ -26875,11 +26958,11 @@ function requireSchemaConstraints () {
 		/**
 		 * Array of all block types that may contain text and inline nodes.
 		 */
-		exports.TEXT_CONTAINERS = __spreadArray([blocks_1.BLOCKS.PARAGRAPH], exports.HEADINGS, true);
+		exports$1.TEXT_CONTAINERS = __spreadArray([blocks_1.BLOCKS.PARAGRAPH], exports$1.HEADINGS, true);
 		/**
 		 * Node types before `tables` release.
 		 */
-		exports.V1_NODE_TYPES = [
+		exports$1.V1_NODE_TYPES = [
 		    blocks_1.BLOCKS.DOCUMENT,
 		    blocks_1.BLOCKS.PARAGRAPH,
 		    blocks_1.BLOCKS.HEADING_1,
@@ -26904,7 +26987,7 @@ function requireSchemaConstraints () {
 		/**
 		 * Marks before `superscript` & `subscript` release.
 		 */
-		exports.V1_MARKS = [marks_1.MARKS.BOLD, marks_1.MARKS.CODE, marks_1.MARKS.ITALIC, marks_1.MARKS.UNDERLINE];
+		exports$1.V1_MARKS = [marks_1.MARKS.BOLD, marks_1.MARKS.CODE, marks_1.MARKS.ITALIC, marks_1.MARKS.UNDERLINE];
 		
 	} (schemaConstraints));
 	return schemaConstraints;
@@ -27048,7 +27131,7 @@ var hasRequiredDist;
 function requireDist () {
 	if (hasRequiredDist) return dist;
 	hasRequiredDist = 1;
-	(function (exports) {
+	(function (exports$1) {
 		var __createBinding = (dist && dist.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 		    if (k2 === undefined) k2 = k;
 		    var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -27065,8 +27148,8 @@ function requireDist () {
 		}) : function(o, v) {
 		    o["default"] = v;
 		});
-		var __exportStar = (dist && dist.__exportStar) || function(m, exports) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+		var __exportStar = (dist && dist.__exportStar) || function(m, exports$1) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports$1, p)) __createBinding(exports$1, m, p);
 		};
 		var __importStar = (dist && dist.__importStar) || function (mod) {
 		    if (mod && mod.__esModule) return mod;
@@ -27075,23 +27158,23 @@ function requireDist () {
 		    __setModuleDefault(result, mod);
 		    return result;
 		};
-		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.getSchemaWithNodeType = exports.helpers = exports.EMPTY_DOCUMENT = exports.MARKS = exports.INLINES = exports.BLOCKS = void 0;
+		Object.defineProperty(exports$1, "__esModule", { value: true });
+		exports$1.getSchemaWithNodeType = exports$1.helpers = exports$1.EMPTY_DOCUMENT = exports$1.MARKS = exports$1.INLINES = exports$1.BLOCKS = void 0;
 		var blocks_1 = requireBlocks();
-		Object.defineProperty(exports, "BLOCKS", { enumerable: true, get: function () { return blocks_1.BLOCKS; } });
+		Object.defineProperty(exports$1, "BLOCKS", { enumerable: true, get: function () { return blocks_1.BLOCKS; } });
 		var inlines_1 = requireInlines();
-		Object.defineProperty(exports, "INLINES", { enumerable: true, get: function () { return inlines_1.INLINES; } });
+		Object.defineProperty(exports$1, "INLINES", { enumerable: true, get: function () { return inlines_1.INLINES; } });
 		var marks_1 = requireMarks();
-		Object.defineProperty(exports, "MARKS", { enumerable: true, get: function () { return marks_1.MARKS; } });
-		__exportStar(requireSchemaConstraints(), exports);
-		__exportStar(requireTypes(), exports);
-		__exportStar(requireNodeTypes(), exports);
+		Object.defineProperty(exports$1, "MARKS", { enumerable: true, get: function () { return marks_1.MARKS; } });
+		__exportStar(requireSchemaConstraints(), exports$1);
+		__exportStar(requireTypes(), exports$1);
+		__exportStar(requireNodeTypes(), exports$1);
 		var emptyDocument_1 = requireEmptyDocument();
-		Object.defineProperty(exports, "EMPTY_DOCUMENT", { enumerable: true, get: function () { return emptyDocument_1.EMPTY_DOCUMENT; } });
+		Object.defineProperty(exports$1, "EMPTY_DOCUMENT", { enumerable: true, get: function () { return emptyDocument_1.EMPTY_DOCUMENT; } });
 		var helpers = __importStar(requireHelpers());
-		exports.helpers = helpers;
+		exports$1.helpers = helpers;
 		var schemas_1 = requireSchemas();
-		Object.defineProperty(exports, "getSchemaWithNodeType", { enumerable: true, get: function () { return schemas_1.getSchemaWithNodeType; } });
+		Object.defineProperty(exports$1, "getSchemaWithNodeType", { enumerable: true, get: function () { return schemas_1.getSchemaWithNodeType; } });
 		
 	} (dist));
 	return dist;
@@ -27099,6 +27182,7 @@ function requireDist () {
 
 var distExports = requireDist();
 
+var safeFlatMap = function (array, callback) { return (array ? array.flatMap(callback) : []); };
 /**
  * Converts a Contentful Rich Text Document to Tiptap JSON format
  */
@@ -27109,68 +27193,68 @@ var contentfulToTiptap = function (document) {
             case distExports.BLOCKS.DOCUMENT:
                 return {
                     type: 'doc',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.PARAGRAPH:
                 return {
                     type: 'paragraph',
-                    content: node.content ? node.content.map(function (child) { return convertNode(child); }).flat() : [],
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_1:
                 return {
                     type: 'heading',
                     attrs: { level: 1 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_2:
                 return {
                     type: 'heading',
                     attrs: { level: 2 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_3:
                 return {
                     type: 'heading',
                     attrs: { level: 3 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_4:
                 return {
                     type: 'heading',
                     attrs: { level: 4 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_5:
                 return {
                     type: 'heading',
                     attrs: { level: 5 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HEADING_6:
                 return {
                     type: 'heading',
                     attrs: { level: 6 },
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.UL_LIST:
                 return {
                     type: 'bulletList',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.OL_LIST:
                 return {
                     type: 'orderedList',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.LIST_ITEM:
                 return {
                     type: 'listItem',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.QUOTE:
                 return {
                     type: 'blockquote',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.HR:
                 return {
@@ -27179,22 +27263,22 @@ var contentfulToTiptap = function (document) {
             case distExports.BLOCKS.TABLE:
                 return {
                     type: 'table',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.TABLE_ROW:
                 return {
                     type: 'tableRow',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.TABLE_CELL:
                 return {
                     type: 'tableCell',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.BLOCKS.TABLE_HEADER_CELL:
                 return {
                     type: 'tableHeader',
-                    content: node.content.map(function (child) { return convertNode(child); }).flat(),
+                    content: safeFlatMap(node.content, convertNode),
                 };
             case distExports.INLINES.HYPERLINK:
                 return {
@@ -27274,7 +27358,7 @@ var contentfulToTiptap = function (document) {
  */
 var tiptapToContentful = function (tiptapDoc) {
     var convertNode = function (node) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
         switch (node.type) {
             case 'doc':
                 return {
@@ -27394,8 +27478,8 @@ var tiptapToContentful = function (tiptapDoc) {
                     };
                 }
                 // Check if this is an inline entry (by looking for specific patterns)
-                var isInlineEntry = node.text && node.text.startsWith('[Inline Entry:');
-                if (isInlineEntry && ((_r = node.marks) === null || _r === void 0 ? void 0 : _r.some(function (mark) { return mark.type === 'bold'; }))) {
+                var isInlineEntry = (_r = node.text) === null || _r === void 0 ? void 0 : _r.startsWith('[Inline Entry:');
+                if (isInlineEntry && ((_s = node.marks) === null || _s === void 0 ? void 0 : _s.some(function (mark) { return mark.type === 'bold'; }))) {
                     // Extract entry ID from the text
                     var match = node.text.match(/\[Inline Entry:\s*([^\]]+)\]/);
                     var entryId = match ? match[1].trim() : 'Unknown';
@@ -27705,13 +27789,11 @@ var createMockFieldConfig = function (options) {
 };
 
 var ContentfulRichTextEditor = function (_a) {
-    var initialValue = _a.initialValue, onChange = _a.onChange, onEmbedEntry = _a.onEmbedEntry, onEmbedAsset = _a.onEmbedAsset, onEmbedInlineEntry = _a.onEmbedInlineEntry, _b = _a.className, className = _b === void 0 ? '' : _b, _c = _a.readonly, readonly = _c === void 0 ? false : _c, _d = _a.placeholder, placeholder = _d === void 0 ? 'Start writing...' : _d, fieldConfiguration = _a.fieldConfiguration, _e = _a.disabledFeatures, disabledFeatures = _e === void 0 ? [] : _e, _f = _a.theme, theme = _f === void 0 ? 'contentful' : _f, _g = _a.availableHeadings, availableHeadings = _g === void 0 ? [1, 2, 3, 4, 5, 6] : _g, _h = _a.availableMarks, availableMarks = _h === void 0 ? ['bold', 'italic', 'underline'] : _h;
-    // Parse Contentful field configuration to determine available features
+    var initialValue = _a.initialValue, onChange = _a.onChange, onEmbedEntry = _a.onEmbedEntry, onEmbedAsset = _a.onEmbedAsset, onEmbedInlineEntry = _a.onEmbedInlineEntry, _b = _a.className, className = _b === void 0 ? '' : _b, _c = _a.readonly, readonly = _c === void 0 ? false : _c, _d = _a.placeholder, placeholder = _d === void 0 ? 'Start writing...' : _d, fieldConfiguration = _a.fieldConfiguration, _e = _a.disabledFeatures, disabledFeatures = _e === void 0 ? [] : _e, _f = _a.theme, theme = _f === void 0 ? 'contentful' : _f, _g = _a.availableHeadings, availableHeadings = _g === void 0 ? [1, 2, 3, 4, 5, 6] : _g, _h = _a.availableMarks, availableMarks = _h === void 0 ? ['bold', 'italic', 'underline'] : _h, _j = _a.showBorder, showBorder = _j === void 0 ? true : _j;
     var editorConfig = React.useMemo(function () {
         if (fieldConfiguration) {
             return parseContentfulFieldConfig(fieldConfiguration);
         }
-        // Fallback to manual configuration
         var disabled = [];
         if (!availableMarks.includes('bold'))
             disabled.push('bold');
@@ -27733,10 +27815,8 @@ var ContentfulRichTextEditor = function (_a) {
             allowLists: !disabledFeatures.includes('lists'),
         };
     }, [fieldConfiguration, disabledFeatures, availableHeadings, availableMarks]);
-    // Build extensions array based on configuration
     var extensions = React.useMemo(function () {
         var exts = [];
-        // Add StarterKit with configuration
         exts.push(StarterKit.configure({
             heading: editorConfig.availableHeadings.length > 0 ? {
                 levels: editorConfig.availableHeadings,
@@ -27759,11 +27839,9 @@ var ContentfulRichTextEditor = function (_a) {
                 },
             } : false,
         }));
-        // Add underline extension only if it's in availableMarks
         if (editorConfig.availableMarks.includes('underline')) {
             exts.push(Underline);
         }
-        // Add link extension only if hyperlinks are allowed
         if (editorConfig.allowHyperlinks) {
             exts.push(Link.configure({
                 openOnClick: false,
@@ -27773,7 +27851,6 @@ var ContentfulRichTextEditor = function (_a) {
                 },
             }));
         }
-        // Add table extensions only if tables are allowed
         if (editorConfig.allowTables) {
             exts.push(Table.configure({
                 resizable: true,
@@ -27819,7 +27896,6 @@ var ContentfulRichTextEditor = function (_a) {
             }
         },
     });
-    // Update editor content when initialValue changes
     React.useEffect(function () {
         if (editor && initialValue) {
             var tiptapContent = contentfulToTiptap(initialValue);
@@ -27923,10 +27999,16 @@ var ContentfulRichTextEditor = function (_a) {
             }
         });
     }); }, [onEmbedInlineEntry, editor, editorConfig.allowInlineEntries]);
+    var editorClass = [
+        'contentful-editor',
+        "contentful-editor--".concat(theme),
+        !showBorder ? 'contentful-editor--borderless' : '',
+        className,
+    ].filter(Boolean).join(' ');
     if (!editor) {
         return (jsxRuntime.jsx("div", { className: "contentful-editor contentful-editor--loading ".concat(className), children: jsxRuntime.jsx("div", { className: "contentful-editor__loading", children: "Loading editor..." }) }));
     }
-    return (jsxRuntime.jsxs("div", { className: "contentful-editor contentful-editor--".concat(theme, " ").concat(className), children: [!readonly && (jsxRuntime.jsx(ContentfulToolbar, { editor: editor, onEmbedEntry: editorConfig.allowEmbeddedEntries ? handleEmbedEntry : undefined, onEmbedAsset: editorConfig.allowEmbeddedAssets ? handleEmbedAsset : undefined, onEmbedInlineEntry: editorConfig.allowInlineEntries ? handleEmbedInlineEntry : undefined, disabledFeatures: editorConfig.disabledFeatures, availableHeadings: editorConfig.availableHeadings, availableMarks: editorConfig.availableMarks, allowHyperlinks: editorConfig.allowHyperlinks })), jsxRuntime.jsx("div", { className: "contentful-editor__content-wrapper", children: jsxRuntime.jsx(EditorContent, { editor: editor, className: "contentful-editor__content" }) })] }));
+    return (jsxRuntime.jsxs("div", { className: editorClass, children: [!readonly && (jsxRuntime.jsx(ContentfulToolbar, { editor: editor, onEmbedEntry: editorConfig.allowEmbeddedEntries ? handleEmbedEntry : undefined, onEmbedAsset: editorConfig.allowEmbeddedAssets ? handleEmbedAsset : undefined, onEmbedInlineEntry: editorConfig.allowInlineEntries ? handleEmbedInlineEntry : undefined, disabledFeatures: editorConfig.disabledFeatures, availableHeadings: editorConfig.availableHeadings, availableMarks: editorConfig.availableMarks, allowHyperlinks: editorConfig.allowHyperlinks })), jsxRuntime.jsx("div", { className: "contentful-editor__content-wrapper", children: jsxRuntime.jsx(EditorContent, { editor: editor, className: "contentful-editor__content", "data-testid": "editor-content" }) })] }));
 };
 
 exports.BLOCKS = distExports.BLOCKS;

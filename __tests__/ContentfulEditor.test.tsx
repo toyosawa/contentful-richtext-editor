@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ContentfulRichTextEditor } from '@components/ContentfulEditor';
 import '@testing-library/jest-dom';
-import { BLOCKS } from '@contentful/rich-text-types';
+import { Document, BLOCKS } from "@contentful/rich-text-types"
 import * as contentfulTransform from '@/utils/contentfulTransform';
 
 // Mock dependencies
@@ -233,7 +233,7 @@ describe('ContentfulRichTextEditor', () => {
     });
 
     it('renders with initialValue', () => {
-      const initialValue = { 
+      const initialValue:Document = { 
         nodeType: BLOCKS.DOCUMENT, 
         data: {}, 
         content: [] 
@@ -450,7 +450,7 @@ describe('ContentfulRichTextEditor', () => {
     });
 
     it('sets initial content when provided', () => {
-      const initialValue = { nodeType: BLOCKS.DOCUMENT, data: {}, content: [] };
+      const initialValue: Document = { nodeType: BLOCKS.DOCUMENT, data: {}, content: [] };
       const mockTiptapContent = { type: 'doc', content: [] };
       
       mockContentfulTransform.contentfulToTiptap.mockReturnValue(mockTiptapContent);
