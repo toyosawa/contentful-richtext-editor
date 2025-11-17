@@ -1,8 +1,6 @@
-'use strict';
-
-var jsxRuntime = require('react/jsx-runtime');
-var React = require('react');
-var ReactDOM = require('react-dom');
+import { jsxs, jsx, Fragment as Fragment$1 } from 'react/jsx-runtime';
+import React, { forwardRef, useRef, useState, useDebugValue, useEffect, createContext, useContext, useLayoutEffect, useMemo, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 
 /******************************************************************************
 Copyright (c) Microsoft Corporation.
@@ -18878,7 +18876,7 @@ class PureEditorContent extends React.Component {
     }
 }
 // EditorContent should be re-created whenever the Editor instance changes
-const EditorContentWithKey = React.forwardRef((props, ref) => {
+const EditorContentWithKey = forwardRef((props, ref) => {
     const key = React.useMemo(() => {
         return Math.floor(Math.random() * 0xffffffff).toString();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19171,7 +19169,7 @@ if (process.env.NODE_ENV === 'production') {
 
 var withSelectorExports = withSelector.exports;
 
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayoutEffect : React.useEffect;
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 /**
  * To synchronize the editor instance with the component state,
  * we need to create a separate instance that is not affected by the component re-renders.
@@ -19251,13 +19249,13 @@ class EditorStateManager {
  */
 function useEditorState(options) {
     var _a;
-    const [editorStateManager] = React.useState(() => new EditorStateManager(options.editor));
+    const [editorStateManager] = useState(() => new EditorStateManager(options.editor));
     // Using the `useSyncExternalStore` hook to sync the editor instance with the component state
     const selectedState = withSelectorExports.useSyncExternalStoreWithSelector(editorStateManager.subscribe, editorStateManager.getSnapshot, editorStateManager.getServerSnapshot, options.selector, (_a = options.equalityFn) !== null && _a !== void 0 ? _a : deepEqual);
     useIsomorphicLayoutEffect(() => {
         return editorStateManager.watch(options.editor);
     }, [options.editor, editorStateManager]);
-    React.useDebugValue(selectedState);
+    useDebugValue(selectedState);
     return selectedState;
 }
 
@@ -19496,14 +19494,14 @@ class EditorInstanceManager {
     }
 }
 function useEditor(options = {}, deps = []) {
-    const mostRecentOptions = React.useRef(options);
+    const mostRecentOptions = useRef(options);
     mostRecentOptions.current = options;
-    const [instanceManager] = React.useState(() => new EditorInstanceManager(mostRecentOptions));
+    const [instanceManager] = useState(() => new EditorInstanceManager(mostRecentOptions));
     const editor = shimExports.useSyncExternalStore(instanceManager.subscribe, instanceManager.getEditor, instanceManager.getServerSnapshot);
-    React.useDebugValue(editor);
+    useDebugValue(editor);
     // This effect will handle creating/updating the editor instance
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    React.useEffect(instanceManager.onRender(deps));
+    useEffect(instanceManager.onRender(deps));
     // The default behavior is to re-render on each transaction
     // This is legacy behavior that will be removed in future versions
     useEditorState({
@@ -19523,15 +19521,15 @@ function useEditor(options = {}, deps = []) {
     return editor;
 }
 
-const EditorContext = React.createContext({
+const EditorContext = createContext({
     editor: null,
 });
 EditorContext.Consumer;
 
-const ReactNodeViewContext = React.createContext({
+const ReactNodeViewContext = createContext({
     onDragStart: undefined,
 });
-const useReactNodeView = () => React.useContext(ReactNodeViewContext);
+const useReactNodeView = () => useContext(ReactNodeViewContext);
 
 React.forwardRef((props, ref) => {
     const { onDragStart } = useReactNodeView();
@@ -26604,8 +26602,8 @@ const Underline = Mark.create({
 
 var ContentfulToolbar = function (_a) {
     var editor = _a.editor, onEmbedEntry = _a.onEmbedEntry, onEmbedAsset = _a.onEmbedAsset, onEmbedInlineEntry = _a.onEmbedInlineEntry, _b = _a.disabledFeatures, disabledFeatures = _b === void 0 ? [] : _b, _c = _a.availableHeadings, availableHeadings = _c === void 0 ? [1, 2, 3, 4, 5, 6] : _c, _d = _a.availableMarks, availableMarks = _d === void 0 ? ['bold', 'italic', 'underline'] : _d, _e = _a.allowHyperlinks, allowHyperlinks = _e === void 0 ? true : _e;
-    var _f = React.useState(false), showLinkInput = _f[0], setShowLinkInput = _f[1];
-    var _g = React.useState(''), linkUrl = _g[0], setLinkUrl = _g[1];
+    var _f = useState(false), showLinkInput = _f[0], setShowLinkInput = _f[1];
+    var _g = useState(''), linkUrl = _g[0], setLinkUrl = _g[1];
     var isDisabled = function (feature) { return disabledFeatures.includes(feature); };
     var isMarkAvailable = function (mark) { return availableMarks.includes(mark); };
     var handleHeadingChange = function (level) {
@@ -26651,7 +26649,7 @@ var ContentfulToolbar = function (_a) {
     var hasHeadings = !isDisabled('headings') && availableHeadings.length > 0;
     var hasAnyEmbedOptions = onEmbedEntry || onEmbedAsset || onEmbedInlineEntry;
     var hasAnyTextFormatting = availableMarks.some(function (mark) { return !isDisabled(mark) && isMarkAvailable(mark); });
-    return (jsxRuntime.jsxs("div", { className: "contentful-toolbar", children: [jsxRuntime.jsxs("div", { className: "contentful-toolbar__group", children: [hasHeadings && (jsxRuntime.jsxs("select", { className: "contentful-toolbar__select", value: getActiveHeading(), onChange: function (e) {
+    return (jsxs("div", { className: "contentful-toolbar", children: [jsxs("div", { className: "contentful-toolbar__group", children: [hasHeadings && (jsxs("select", { className: "contentful-toolbar__select", value: getActiveHeading(), onChange: function (e) {
                             var value = e.target.value;
                             if (value === 'Normal text') {
                                 handleHeadingChange(0);
@@ -26660,7 +26658,7 @@ var ContentfulToolbar = function (_a) {
                                 var level = parseInt(value.replace('Heading ', ''));
                                 handleHeadingChange(level);
                             }
-                        }, children: [jsxRuntime.jsx("option", { value: "Normal text", children: "Normal text" }), availableHeadings.map(function (level) { return (jsxRuntime.jsxs("option", { value: "Heading ".concat(level), children: ["Heading ", level] }, level)); })] })), jsxRuntime.jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().undo().run(); }, disabled: !editor.can().undo(), title: "Undo", children: "\u21B6" }), jsxRuntime.jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().redo().run(); }, disabled: !editor.can().redo(), title: "Redo", children: "\u21B7" })] }), (hasAnyTextFormatting || allowHyperlinks) && (jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [jsxRuntime.jsx("div", { className: "contentful-toolbar__separator" }), jsxRuntime.jsxs("div", { className: "contentful-toolbar__group", children: [!isDisabled('bold') && isMarkAvailable('bold') && (jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('bold') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBold().run(); }, title: "Bold", children: jsxRuntime.jsx("strong", { children: "B" }) })), !isDisabled('italic') && isMarkAvailable('italic') && (jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('italic') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleItalic().run(); }, title: "Italic", children: jsxRuntime.jsx("em", { children: "I" }) })), !isDisabled('underline') && isMarkAvailable('underline') && (jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('underline') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleUnderline().run(); }, title: "Underline", children: jsxRuntime.jsx("u", { children: "U" }) })), jsxRuntime.jsx("button", { className: "contentful-toolbar__button", title: "More formatting options", children: "\u22EF" }), !isDisabled('link') && allowHyperlinks && (jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('link') ? 'contentful-toolbar__button--active' : ''), onClick: handleLinkToggle, title: "Link", children: "\uD83D\uDD17" }), showLinkInput && (jsxRuntime.jsxs("div", { className: "contentful-toolbar__link-input", children: [jsxRuntime.jsx("input", { type: "url", value: linkUrl, onChange: function (e) { return setLinkUrl(e.target.value); }, placeholder: "Enter URL", onKeyDown: function (e) {
+                        }, children: [jsx("option", { value: "Normal text", children: "Normal text" }), availableHeadings.map(function (level) { return (jsxs("option", { value: "Heading ".concat(level), children: ["Heading ", level] }, level)); })] })), jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().undo().run(); }, disabled: !editor.can().undo(), title: "Undo", children: "\u21B6" }), jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().redo().run(); }, disabled: !editor.can().redo(), title: "Redo", children: "\u21B7" })] }), (hasAnyTextFormatting || allowHyperlinks) && (jsxs(Fragment$1, { children: [jsx("div", { className: "contentful-toolbar__separator" }), jsxs("div", { className: "contentful-toolbar__group", children: [!isDisabled('bold') && isMarkAvailable('bold') && (jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('bold') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBold().run(); }, title: "Bold", children: jsx("strong", { children: "B" }) })), !isDisabled('italic') && isMarkAvailable('italic') && (jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('italic') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleItalic().run(); }, title: "Italic", children: jsx("em", { children: "I" }) })), !isDisabled('underline') && isMarkAvailable('underline') && (jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('underline') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleUnderline().run(); }, title: "Underline", children: jsx("u", { children: "U" }) })), jsx("button", { className: "contentful-toolbar__button", title: "More formatting options", children: "\u22EF" }), !isDisabled('link') && allowHyperlinks && (jsxs(Fragment$1, { children: [jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('link') ? 'contentful-toolbar__button--active' : ''), onClick: handleLinkToggle, title: "Link", children: "\uD83D\uDD17" }), showLinkInput && (jsxs("div", { className: "contentful-toolbar__link-input", children: [jsx("input", { type: "url", value: linkUrl, onChange: function (e) { return setLinkUrl(e.target.value); }, placeholder: "Enter URL", onKeyDown: function (e) {
                                                     if (e.key === 'Enter') {
                                                         e.preventDefault();
                                                         handleLinkSubmit();
@@ -26669,7 +26667,7 @@ var ContentfulToolbar = function (_a) {
                                                         e.preventDefault();
                                                         handleLinkCancel();
                                                     }
-                                                }, autoFocus: true }), jsxRuntime.jsx("button", { onClick: handleLinkSubmit, title: "Apply link", children: "\u2713" }), jsxRuntime.jsx("button", { onClick: handleLinkCancel, title: "Cancel", children: "\u2717" })] }))] }))] })] })), (!isDisabled('lists') || !isDisabled('quote') || !isDisabled('table')) && (jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [jsxRuntime.jsx("div", { className: "contentful-toolbar__separator" }), jsxRuntime.jsxs("div", { className: "contentful-toolbar__group", children: [!isDisabled('lists') && (jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('bulletList') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBulletList().run(); }, title: "Bullet List", children: "\u2022 \u2261" }), jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('orderedList') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleOrderedList().run(); }, title: "Numbered List", children: "1. \u2261" })] })), !isDisabled('quote') && (jsxRuntime.jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('blockquote') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBlockquote().run(); }, title: "Quote", children: "\"" })), jsxRuntime.jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().setHorizontalRule().run(); }, title: "Horizontal Rule", children: "\u2014" }), !isDisabled('table') && (jsxRuntime.jsx("button", { className: "contentful-toolbar__button", onClick: insertTable, title: "Insert Table", children: "\u229E" }))] })] })), hasAnyEmbedOptions && !isDisabled('embed') && (jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [jsxRuntime.jsx("div", { className: "contentful-toolbar__separator" }), jsxRuntime.jsx("div", { className: "contentful-toolbar__group contentful-toolbar__group--right", children: jsxRuntime.jsxs("div", { className: "contentful-toolbar__embed-dropdown", children: [jsxRuntime.jsx("button", { className: "contentful-toolbar__embed-button", children: "+ Embed \u25BC" }), jsxRuntime.jsxs("div", { className: "contentful-toolbar__embed-menu", children: [onEmbedEntry && (jsxRuntime.jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedEntry, children: "\uD83D\uDCC4 Entry" })), onEmbedInlineEntry && (jsxRuntime.jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedInlineEntry, children: "\uD83D\uDCDD Inline Entry" })), onEmbedAsset && (jsxRuntime.jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedAsset, children: "\uD83D\uDDBC\uFE0F Media" }))] })] }) })] }))] }));
+                                                }, autoFocus: true }), jsx("button", { onClick: handleLinkSubmit, title: "Apply link", children: "\u2713" }), jsx("button", { onClick: handleLinkCancel, title: "Cancel", children: "\u2717" })] }))] }))] })] })), (!isDisabled('lists') || !isDisabled('quote') || !isDisabled('table')) && (jsxs(Fragment$1, { children: [jsx("div", { className: "contentful-toolbar__separator" }), jsxs("div", { className: "contentful-toolbar__group", children: [!isDisabled('lists') && (jsxs(Fragment$1, { children: [jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('bulletList') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBulletList().run(); }, title: "Bullet List", children: "\u2022 \u2261" }), jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('orderedList') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleOrderedList().run(); }, title: "Numbered List", children: "1. \u2261" })] })), !isDisabled('quote') && (jsx("button", { className: "contentful-toolbar__button ".concat(editor.isActive('blockquote') ? 'contentful-toolbar__button--active' : ''), onClick: function () { return editor.chain().focus().toggleBlockquote().run(); }, title: "Quote", children: "\"" })), jsx("button", { className: "contentful-toolbar__button", onClick: function () { return editor.chain().focus().setHorizontalRule().run(); }, title: "Horizontal Rule", children: "\u2014" }), !isDisabled('table') && (jsx("button", { className: "contentful-toolbar__button", onClick: insertTable, title: "Insert Table", children: "\u229E" }))] })] })), hasAnyEmbedOptions && !isDisabled('embed') && (jsxs(Fragment$1, { children: [jsx("div", { className: "contentful-toolbar__separator" }), jsx("div", { className: "contentful-toolbar__group contentful-toolbar__group--right", children: jsxs("div", { className: "contentful-toolbar__embed-dropdown", children: [jsx("button", { className: "contentful-toolbar__embed-button", children: "+ Embed \u25BC" }), jsxs("div", { className: "contentful-toolbar__embed-menu", children: [onEmbedEntry && (jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedEntry, children: "\uD83D\uDCC4 Entry" })), onEmbedInlineEntry && (jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedInlineEntry, children: "\uD83D\uDCDD Inline Entry" })), onEmbedAsset && (jsx("button", { className: "contentful-toolbar__embed-option", onClick: onEmbedAsset, children: "\uD83D\uDDBC\uFE0F Media" }))] })] }) })] }))] }));
 };
 
 var dist = {};
@@ -27707,7 +27705,7 @@ var createMockFieldConfig = function (options) {
 
 var ContentfulRichTextEditor = function (_a) {
     var initialValue = _a.initialValue, onChange = _a.onChange, onEmbedEntry = _a.onEmbedEntry, onEmbedAsset = _a.onEmbedAsset, onEmbedInlineEntry = _a.onEmbedInlineEntry, _b = _a.className, className = _b === void 0 ? '' : _b, _c = _a.readonly, readonly = _c === void 0 ? false : _c, _d = _a.placeholder, placeholder = _d === void 0 ? 'Start writing...' : _d, fieldConfiguration = _a.fieldConfiguration, _e = _a.disabledFeatures, disabledFeatures = _e === void 0 ? [] : _e, _f = _a.theme, theme = _f === void 0 ? 'contentful' : _f, _g = _a.availableHeadings, availableHeadings = _g === void 0 ? [1, 2, 3, 4, 5, 6] : _g, _h = _a.availableMarks, availableMarks = _h === void 0 ? ['bold', 'italic', 'underline'] : _h, _j = _a.showBorder, showBorder = _j === void 0 ? true : _j;
-    var editorConfig = React.useMemo(function () {
+    var editorConfig = useMemo(function () {
         if (fieldConfiguration) {
             return parseContentfulFieldConfig(fieldConfiguration);
         }
@@ -27732,7 +27730,7 @@ var ContentfulRichTextEditor = function (_a) {
             allowLists: !disabledFeatures.includes('lists'),
         };
     }, [fieldConfiguration, disabledFeatures, availableHeadings, availableMarks]);
-    var extensions = React.useMemo(function () {
+    var extensions = useMemo(function () {
         var exts = [];
         exts.push(StarterKit.configure({
             heading: editorConfig.availableHeadings.length > 0 ? {
@@ -27813,13 +27811,13 @@ var ContentfulRichTextEditor = function (_a) {
             }
         },
     });
-    React.useEffect(function () {
+    useEffect(function () {
         if (editor && initialValue) {
             var tiptapContent = contentfulToTiptap(initialValue);
             editor.commands.setContent(tiptapContent, false);
         }
     }, [editor, initialValue]);
-    var handleEmbedEntry = React.useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
+    var handleEmbedEntry = useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
         var entry, error_1;
         var _a, _b;
         return __generator(this, function (_c) {
@@ -27853,7 +27851,7 @@ var ContentfulRichTextEditor = function (_a) {
             }
         });
     }); }, [onEmbedEntry, editor, editorConfig.allowEmbeddedEntries]);
-    var handleEmbedAsset = React.useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
+    var handleEmbedAsset = useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
         var asset, error_2;
         var _a, _b;
         return __generator(this, function (_c) {
@@ -27887,7 +27885,7 @@ var ContentfulRichTextEditor = function (_a) {
             }
         });
     }); }, [onEmbedAsset, editor, editorConfig.allowEmbeddedAssets]);
-    var handleEmbedInlineEntry = React.useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
+    var handleEmbedInlineEntry = useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
         var entry, error_3;
         var _a, _b;
         return __generator(this, function (_c) {
@@ -27923,25 +27921,13 @@ var ContentfulRichTextEditor = function (_a) {
         className,
     ].filter(Boolean).join(' ');
     if (!editor) {
-        return (jsxRuntime.jsx("div", { className: "contentful-editor contentful-editor--loading ".concat(className), children: jsxRuntime.jsx("div", { className: "contentful-editor__loading", children: "Loading editor..." }) }));
+        return (jsx("div", { className: "contentful-editor contentful-editor--loading ".concat(className), children: jsx("div", { className: "contentful-editor__loading", children: "Loading editor..." }) }));
     }
-    return (jsxRuntime.jsxs("div", { className: editorClass, children: [!readonly && (jsxRuntime.jsx(ContentfulToolbar, { editor: editor, onEmbedEntry: editorConfig.allowEmbeddedEntries ? handleEmbedEntry : undefined, onEmbedAsset: editorConfig.allowEmbeddedAssets ? handleEmbedAsset : undefined, onEmbedInlineEntry: editorConfig.allowInlineEntries ? handleEmbedInlineEntry : undefined, disabledFeatures: editorConfig.disabledFeatures, availableHeadings: editorConfig.availableHeadings, availableMarks: editorConfig.availableMarks, allowHyperlinks: editorConfig.allowHyperlinks })), jsxRuntime.jsx("div", { className: "contentful-editor__content-wrapper", children: jsxRuntime.jsx(EditorContent, { editor: editor, className: "contentful-editor__content", "data-testid": "editor-content" }) })] }));
+    return (jsxs("div", { className: editorClass, children: [!readonly && (jsx(ContentfulToolbar, { editor: editor, onEmbedEntry: editorConfig.allowEmbeddedEntries ? handleEmbedEntry : undefined, onEmbedAsset: editorConfig.allowEmbeddedAssets ? handleEmbedAsset : undefined, onEmbedInlineEntry: editorConfig.allowInlineEntries ? handleEmbedInlineEntry : undefined, disabledFeatures: editorConfig.disabledFeatures, availableHeadings: editorConfig.availableHeadings, availableMarks: editorConfig.availableMarks, allowHyperlinks: editorConfig.allowHyperlinks })), jsx("div", { className: "contentful-editor__content-wrapper", children: jsx(EditorContent, { editor: editor, className: "contentful-editor__content", "data-testid": "editor-content" }) })] }));
 };
 
-exports.BLOCKS = distExports.BLOCKS;
-exports.ContentfulRichTextEditor = ContentfulRichTextEditor;
-exports.ContentfulToolbar = ContentfulToolbar;
-exports.INLINES = distExports.INLINES;
-exports.MARKS = distExports.MARKS;
-exports.contentfulToTiptap = contentfulToTiptap;
-exports.countWords = countWords;
-exports.createEmptyDocument = createEmptyDocument;
-exports.createMockFieldConfig = createMockFieldConfig;
-exports.extractPlainText = extractPlainText;
-exports.fetchContentfulFieldConfig = fetchContentfulFieldConfig;
-exports.findEmbeddedContent = findEmbeddedContent;
-exports.parseContentfulFieldConfig = parseContentfulFieldConfig;
-exports.sanitizeContentfulDocument = sanitizeContentfulDocument;
-exports.tiptapToContentful = tiptapToContentful;
-exports.validateContentfulDocument = validateContentfulDocument;
-//# sourceMappingURL=index.js.map
+var BLOCKS = distExports.BLOCKS;
+var INLINES = distExports.INLINES;
+var MARKS = distExports.MARKS;
+export { BLOCKS, ContentfulRichTextEditor, ContentfulToolbar, INLINES, MARKS, contentfulToTiptap, countWords, createEmptyDocument, createMockFieldConfig, extractPlainText, fetchContentfulFieldConfig, findEmbeddedContent, parseContentfulFieldConfig, sanitizeContentfulDocument, tiptapToContentful, validateContentfulDocument };
+//# sourceMappingURL=index.esm.js.map
